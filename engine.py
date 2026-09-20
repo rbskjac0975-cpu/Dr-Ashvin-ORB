@@ -257,6 +257,51 @@ def add_intraday_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
+# --------------------------------------------------------------------------- multi-timeframe
+TIMEFRAMES = {"1m": 1, "3m": 3, "5m": 5, "15m": 15}
+
+
+def resample_ohlcv(df: pd.DataFrame, minutes: int) -> pd.DataFrame:
+    """Aggregate 1-minute bars to N-minute bars aligned to the 09:15 market open."""
+    if minutes <= 1:
+        return df
+    o = df.resample(f"{minutes}min", origin="start_day", offset=pd.Timedelta(minutes=555)).agg(
+        {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"})
+    return o.dropna(subset=["Close"])
+
+
+def tf_frame(raw_1m: pd.DataFrame, minutes: int) -> pd.DataFrame:
+    """Resample multi-day 1-minute data and add VWAP (per session), EMA9/21, ATR, RSI.
+    Using several days of history warms up the EMAs so higher timeframes are meaningful."""
+    d = resample_ohlcv(raw_1m.between_time("09:15", "15:29"), minutes)
+    d = add_intraday_indicators(d)
+    d["rsi"] = rsi(d["Close"])
+    return d
+
+
+def mtf_state(frames: Dict[str, pd.DataFrame]) -> List[dict]:
+    out = []
+    for name, d in frames.items():
+        if d is None or d.empty:
+            continue
+        l = d.iloc[-1]
+        has_vw = bool(pd.notna(l["vwap"]))
+        above = has_vw and l["Close"] > l["vwap"]
+        below = has_vw and l["Close"] < l["vwap"]
+        e_up = bool(l["ema9"] > l["ema21"])
+        trend = "Bullish" if (above and e_up) else "Bearish" if (below and not e_up) else "Mixed"
+        rsi_v = float(l["rsi"]) if "rsi" in d.columns and pd.notna(l["rsi"]) else float(rsi(d["Close"]).iloc[-1])
+        out.append(dict(tf=name, trend=trend, rsi=round(rsi_v, 1), close=float(l["Close"]),
+                        vwap=float(l["vwap"]) if has_vw else np.nan, ema_bull=e_up))
+    return out
+
+
+def mtf_agrees(states: List[dict], side: str, tfs=("5m", "15m")) -> Tuple[int, int]:
+    want = "Bullish" if side == "LONG" else "Bearish"
+    use = [s for s in states if s["tf"] in tfs]
+    return sum(s["trend"] == want for s in use), len(use)
+
+
 # --------------------------------------------------------------------------- daily setup / watchlist
 def score_side(m: dict, side: str) -> int:
     sc = 0

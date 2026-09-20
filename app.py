@@ -33,6 +33,12 @@ def load_1m(sym: str):
     return E.download_batch([sym], "1d", "1m").get(sym)
 
 
+@st.cache_data(ttl=15, show_spinner=False)
+def load_1m_5d(sym: str):
+    """5 sessions of 1-minute bars: source for 3m/5m/15m charts (warms up EMAs)."""
+    return E.download_batch([sym], "5d", "1m").get(sym)
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def nifty_ret20():
     return E.index_ret20()
@@ -122,10 +128,10 @@ tab_wl, tab_br, tab_sc, tab_desk, tab_tm = st.tabs(
 
 
 # ----------------------------------------------------------------------------- chart
-def make_chart(ind, orb, sigs, lines, focus, title=""):
+def make_chart(ind, orb, sigs, lines, focus, title="", height=650, tf="1m"):
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.78, 0.22], vertical_spacing=0.02)
     x = ind.index
-    fig.add_trace(go.Candlestick(x=x, open=ind.Open, high=ind.High, low=ind.Low, close=ind.Close, name="1m",
+    fig.add_trace(go.Candlestick(x=x, open=ind.Open, high=ind.High, low=ind.Low, close=ind.Close, name=tf,
                                  increasing_line_color="#2ec4a6", decreasing_line_color="#ef5b5b"), 1, 1)
     if ind["vwap"].notna().any():
         fig.add_trace(go.Scatter(x=x, y=ind["vwap"], name="VWAP", line=dict(color="#f5b83d", width=1.8)), 1, 1)
@@ -137,8 +143,12 @@ def make_chart(ind, orb, sigs, lines, focus, title=""):
             fig.add_hline(y=v, line=dict(color="#6ea8fe", dash="dash", width=1), annotation_text=f"{nm} {v:.2f}",
                           annotation_position="left", row=1, col=1)
     for s in sigs:
+        pos = ind.index.searchsorted(s["ts"], side="right") - 1
+        if pos < 0:
+            continue
         up = s["side"] == "LONG"
-        fig.add_trace(go.Scatter(x=[s["ts"]], y=[ind.loc[s["ts"], "Low" if up else "High"] * (0.999 if up else 1.001)],
+        bar = ind.iloc[pos]
+        fig.add_trace(go.Scatter(x=[ind.index[pos]], y=[bar["Low"] * 0.999 if up else bar["High"] * 1.001],
                                  mode="markers+text", text=[s["side"]], textposition="bottom center" if up else "top center",
                                  marker=dict(symbol="triangle-up" if up else "triangle-down", size=14,
                                              color="#2ec4a6" if up else "#ef5b5b"), name=f"{s['side']} signal",
@@ -152,7 +162,7 @@ def make_chart(ind, orb, sigs, lines, focus, title=""):
     hi = max([ind.High.max()] + focus)
     pad = (hi - lo) * 0.04
     fig.update_yaxes(range=[lo - pad, hi + pad], row=1, col=1)
-    fig.update_layout(template="plotly_dark", height=650, title=title, xaxis_rangeslider_visible=False,
+    fig.update_layout(template="plotly_dark", height=height, title=title, xaxis_rangeslider_visible=False,
                       margin=dict(l=10, r=90, t=40, b=10), legend=dict(orientation="h", y=1.04))
     return fig
 
@@ -277,23 +287,43 @@ with tab_sc:
     st.fragment(run_every=int(every) if auto else None)(scanner_panel)()
 
 # ----------------------------------------------------------------------------- 4. live desk
+VIEWS = {"1m": ["1m"], "3m": ["3m"], "5m": ["5m"], "15m": ["15m"],
+         "1m + 5m": ["1m", "5m"], "5m + 15m": ["5m", "15m"], "1m + 5m + 15m": ["1m", "5m", "15m"],
+         "All 4": ["1m", "3m", "5m", "15m"]}
+TREND_ICON = {"Bullish": "🟢", "Bearish": "🔴", "Mixed": "🟡"}
+
 with tab_desk:
     scan_res = st.session_state.get("scan")
     strong = list(scan_res[scan_res.status == "STRONG BUY"].symbol) if isinstance(scan_res, pd.DataFrame) and not scan_res.empty else []
     pins = st.session_state.get("pins") or store.load_watchlist()
     opts = list(dict.fromkeys(strong + list(pins) + symbols))
-    d1, d2 = st.columns([3, 1])
+    d1, d2, d3 = st.columns([2, 3, 1])
     sym = d1.selectbox("Symbol", opts, help="Strong buys first, then pinned watchlist, then the whole universe.")
-    live = d2.toggle("Live refresh", E.market_open())
+    view = d2.radio("Timeframes", list(VIEWS), index=4, horizontal=True,
+                    help="Entries are confirmed on 1-minute closes. Higher timeframes give trend context.")
+    live = d3.toggle("Live refresh", E.market_open())
 
-    def desk_body(sym):
+    def desk_body(sym, view):
         df = load_1m(sym)
         if df is None or df.empty:
             st.warning("No 1-minute data for this symbol right now.")
             return
-        ind = E.add_intraday_indicators(E.session_df(df))
+        ind = E.add_intraday_indicators(E.session_df(df))          # signals always come from 1-minute candles
         orb = E.orb_levels(ind, cfg)
         sigs = E.find_signals(ind, orb, cfg)
+
+        frames = {"1m": ind}
+        raw5 = load_1m_5d(sym)
+        for name, mins in E.TIMEFRAMES.items():
+            if name == "1m":
+                continue
+            try:
+                src = raw5 if raw5 is not None and not raw5.empty else df
+                frames[name] = E.tf_frame(src, mins)
+            except Exception:
+                pass
+        states = E.mtf_state(frames)
+
         b = st.session_state.get("breadth")
         trade = store.open_for(sym)
         sig = sigs[-1] if sigs else None
@@ -306,8 +336,35 @@ with tab_desk:
             lines = {"Entry": (sig["entry"], "#6ea8fe"), "SL": (sig["sl"], "#ef5b5b"),
                      **{f"T{i + 1}": (v, "#2ec4a6") for i, v in enumerate(sig["targets"])}}
             focus = [sig["sl"], sig["targets"][0], sig["entry"]]
+
+        # trend strip across timeframes
+        if states:
+            cols = st.columns(len(states))
+            for c, stt in zip(cols, states):
+                c.metric(f"{stt['tf']} trend", f"{TREND_ICON[stt['trend']]} {stt['trend']}", f"RSI {stt['rsi']:.0f}", delta_color="off")
+            st.caption("Trend = price vs VWAP and EMA9 vs EMA21 on that timeframe. Bullish needs both up, Bearish needs both down.")
+
         chart, side = st.columns([3, 1.1])
-        chart.plotly_chart(make_chart(ind, orb, sigs, lines, focus, f"{sym}  -  1 minute"), use_container_width=True)
+        tfs = [t for t in VIEWS[view] if t in frames]
+
+        def show(container, tf, height):
+            f = frames[tf]
+            f = f[f.index.date == f.index[-1].date()]                # display latest session only
+            container.plotly_chart(make_chart(f, orb, sigs, lines, focus, f"{sym}  -  {tf}", height=height, tf=tf),
+                                   use_container_width=True, key=f"chart_{sym}_{tf}_{view}")
+
+        with chart:
+            if len(tfs) == 1:
+                show(chart, tfs[0], 650)
+            elif len(tfs) == 4:
+                for row in (tfs[:2], tfs[2:]):
+                    cc = st.columns(2)
+                    for c, tf in zip(cc, row):
+                        show(c, tf, 380)
+            else:
+                for tf in tfs:
+                    show(chart, tf, 430 if len(tfs) == 2 else 340)
+
         last = ind.iloc[-1]
         with side:
             st.metric("LTP", f"{last.Close:.2f}", f"{(last.Close / ind.Open.iloc[0] - 1) * 100:+.2f}% from open")
@@ -328,6 +385,11 @@ with tab_desk:
                 (st.success if gate_ok else st.warning)(
                     f"{sig['side']} confirmed {sig['ts'].strftime('%H:%M')} (volume {sig['vol_ratio']}x)"
                     + ("" if gate_ok else " - blocked by market breadth"))
+                n_ok, n_tot = E.mtf_agrees(states, sig["side"])
+                if n_tot:
+                    (st.success if n_ok == n_tot else st.warning)(
+                        f"5m and 15m trend: {n_ok}/{n_tot} agree with this {sig['side'].lower()}"
+                        + ("" if n_ok == n_tot else " - higher timeframe disagrees, size down or skip"))
                 st.table(pd.DataFrame({"Level": ["Entry", "Stop loss", "T1", "T2", "T3", "ORB projection", "Qty", "Risk ₹", "Capital used ₹"],
                                        "Value": [sig["entry"], sig["sl"], *sig["targets"], sig["orb_target"], sig["qty"],
                                                  f"{sig['risk_amt']:,.0f}", f"{sig['capital_used']:,.0f}"]}).astype(str))
@@ -339,7 +401,7 @@ with tab_desk:
             elif orb and orb["formed"] and orb["range_ok"]:
                 st.info(f"Inside the range. Long trigger above {orb['high']:.2f}, short below {orb['low']:.2f}, on a 1-minute close.")
 
-    st.fragment(run_every=refresh_s if live else None)(desk_body)(sym)
+    st.fragment(run_every=refresh_s if live else None)(desk_body)(sym, view)
 
 # ----------------------------------------------------------------------------- 5. trade manager
 with tab_tm:
