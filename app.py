@@ -169,7 +169,7 @@ with tab_wl:
     if wl is None or wl.empty:
         st.info("Click Build watchlist to score the universe.")
     else:
-        st.caption(f"Levels are from the session of {wl.asof.max()}. Score = trend + momentum + proximity to 20-day extreme + volume + relative strength + tradable volatility.")
+        st.caption(f"Levels are from the session of {wl['asof'].max()}. Score = trend + momentum + proximity to 20-day extreme + volume + relative strength + tradable volatility.")
         cols = ["symbol", "score", "close", "pdh", "pdl", "pivot", "r1", "s1", "hh20", "atr_pct", "rsi", "vol_x", "rs20"]
         longs = wl.sort_values("long_score", ascending=False).head(top_n).rename(columns={"long_score": "score"})
         shorts = wl.sort_values("short_score", ascending=False).head(top_n).rename(columns={"short_score": "score"})
