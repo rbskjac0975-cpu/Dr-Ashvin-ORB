@@ -264,12 +264,15 @@ with tab_sc:
         n = int((res.status == "STRONG BUY").sum())
         (st.success if n else st.info)(f"{n} strong buy | {len(res)} names checked on 1-minute data | last scan {E.now_ist().strftime('%H:%M:%S')}")
 
-        def hl(row):
-            col = {"STRONG BUY": "background-color:#c9f2dc;color:#0b3d24;font-weight:600",
-                   "BUY (late/weak)": "background-color:#fff0bf;color:#5a4200",
-                   "NEAR ORB HIGH": "background-color:#d9e6ff;color:#12305c"}.get(row["status"], "")
-            return [col] * len(row)
-        st.dataframe(res.style.apply(hl, axis=1), hide_index=True, use_container_width=True, height=560)
+        icons = {"STRONG BUY": "🟢 STRONG BUY", "BUY (late/weak)": "🟡 BUY (late/weak)",
+                 "NEAR ORB HIGH": "🔵 NEAR ORB HIGH", "WATCH": "⚪ WATCH"}
+        show = res.copy()
+        show["status"] = show["status"].map(icons).fillna(show["status"])
+        st.caption("🟢 Strong buy · 🟡 Signal exists but late or weak · 🔵 Near ORB high, waiting for breakout · ⚪ Watch only")
+        st.dataframe(show, hide_index=True, use_container_width=True, height=560,
+                     column_order=["symbol", "status", "score", "price", "day_chg", "entry", "sl", "t1", "t2", "t3", "qty",
+                                   "risk_amt", "rvol", "sig_time", "age_min", "vwap", "orb_high", "orb_low",
+                                   "daily_score", "intraday_score", "industry"])
 
     st.fragment(run_every=int(every) if auto else None)(scanner_panel)()
 
