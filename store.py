@@ -39,6 +39,7 @@ def init() -> None:
     _run("CREATE TABLE IF NOT EXISTS trades(id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, symbol TEXT, data TEXT)")
     _run("CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, text TEXT)")
     _run("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)")
+    _run("CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT, data TEXT)")
 
 
 # ---- trades
@@ -110,3 +111,27 @@ def save_watchlist(symbols: list) -> None:
 
 def load_watchlist() -> list:
     return get_meta("watchlist", []) or []
+
+
+def list_meta(prefix: str) -> list:
+    """Keys in the meta table that start with prefix (used for saved replay packs / gap snapshots)."""
+    rows = _run("SELECT k FROM meta WHERE k LIKE ? ORDER BY k", (prefix + "%",), fetch=True)
+    return [r["k"] for r in rows]
+
+
+# ---- trading journal (private per access key: rows are only ever read back with the same owner hash)
+def add_journal(owner: str, e: dict) -> int:
+    return _run("INSERT INTO journal(owner, data) VALUES(?,?)", (owner, json.dumps(e, default=_j)))
+
+
+def journal_list(owner: str) -> list:
+    out = []
+    for r in _run("SELECT * FROM journal WHERE owner=? ORDER BY id", (owner,), fetch=True):
+        d = json.loads(r["data"])
+        d["id"] = r["id"]
+        out.append(d)
+    return out
+
+
+def journal_delete(owner: str, jid: int) -> None:
+    _run("DELETE FROM journal WHERE owner=? AND id=?", (owner, jid))

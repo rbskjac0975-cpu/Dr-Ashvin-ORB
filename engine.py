@@ -53,6 +53,26 @@ class Cfg:
     top_k: int = 40                  # stage-2 (1-min) candidates
     fresh_min: int = 10              # alert only if signal is this fresh
     min_turnover_cr: float = 10.0    # avg daily turnover filter (Rs crore)
+    # breakout leaders (F&O universe)
+    ld_min_price: float = 50.0       # layer 1: junk filter
+    ld_min_turnover_cr: float = 25.0 # layer 1: illiquid filter (avg daily turnover, Rs crore)
+    ld_spurt_vol: float = 1.5        # tier thresholds: signal-bar volume vs 20-bar average
+    ld_strong_vol: float = 2.5
+    ld_explosive_vol: float = 4.0
+    ld_strong_score: int = 60
+    ld_explosive_score: int = 78
+    ld_max_age: int = 45             # layer 3: drop leaders detected longer ago than this (minutes)
+    ld_late_ext: float = 1.0         # layer 3: drop if price is already this many ORB-widths past the breakout level
+    ld_shorts: bool = True           # include breakdown (short / PE) leaders
+    ld_strike_pref: str = "ATM"      # ATM | ITM-1 | OTM-1
+    expiry_weekday: int = 1          # monthly stock-option expiry weekday (0=Mon ... 1=Tue). Verify with NSE.
+    # trend ignition (open = low / open = high)
+    ig_window: int = 15              # ignition candle must appear within this many minutes of the open
+    ig_vol: float = 2.0              # ignition candle volume vs average per-minute daily volume (x)
+    ig_open_tol: float = 0.10        # open must be within this % of the candle's low (long) / high (short)
+    ig_body: float = 0.6             # min candle body / range
+    ig_min_move: float = 0.25        # min candle body as % of price (a real impulse, not a drifting open)
+    ig_max_risk_pct: float = 1.5     # skip if the ignition candle is wider than this % of price
 
 
 def save_cfg(cfg: Cfg) -> None:

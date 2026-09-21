@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date as _date, time as _time, timedelta
 
 import numpy as np
 import pandas as pd
@@ -11,6 +12,9 @@ import streamlit.components.v1 as components
 from plotly.subplots import make_subplots
 
 import engine as E
+import fno as F
+import journal as J
+import leaders as L
 import store
 
 st.set_page_config(page_title="ORB Command Center", page_icon="📈", layout="wide")
@@ -47,6 +51,28 @@ def nifty_ret20():
 @st.cache_data(ttl=90, show_spinner=False)
 def load_breadth(name, _daily, _industry):
     return E.compute_breadth(_daily, _industry)
+
+
+# ---- F&O universe loaders (used by Breakout Leaders / Trend Ignition / Gaps / Replay)
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_fno():
+    return F.load_fno()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_fno_daily(symbols: tuple):
+    return E.download_batch(list(symbols), "6mo", "1d")
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def load_fno_1m(symbols: tuple):
+    return E.download_batch(list(symbols), "1d", "1m", chunk=40)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_fno_5d(symbols: tuple):
+    """Up to 5 sessions of 1-minute bars (yfinance keeps ~7 days of 1m history) - source for replaying a past day."""
+    return E.download_batch(list(symbols), "5d", "1m", chunk=40)
 
 
 def beep():
@@ -97,6 +123,29 @@ with st.sidebar:
         top_k = st.slider("Stocks sent to 1-min stage", 10, 100, int(saved.top_k), 5)
         fresh_min = st.slider("Alert only if signal is newer than (min)", 2, 60, int(saved.fresh_min))
         min_turn = st.number_input("Min avg turnover (₹ Cr)", 0.0, 500.0, float(saved.min_turnover_cr), 5.0)
+    with st.expander("Breakout Leaders and F&O"):
+        ld_min_price = st.number_input("Junk filter: min price (₹)", 0.0, 5000.0, float(saved.ld_min_price), 10.0)
+        ld_min_turn = st.number_input("Illiquid filter: min avg turnover (₹ Cr)", 0.0, 1000.0, float(saved.ld_min_turnover_cr), 5.0)
+        ld_spurt = st.slider("⚡ SPURT: volume jump ≥ (x)", 1.0, 3.0, float(saved.ld_spurt_vol), 0.1)
+        ld_strong = st.slider("🔥 STRONG: volume jump ≥ (x)", 1.5, 6.0, float(saved.ld_strong_vol), 0.1)
+        ld_expl = st.slider("💥 EXPLOSIVE: volume jump ≥ (x)", 2.0, 10.0, float(saved.ld_explosive_vol), 0.1)
+        ld_strong_score = st.slider("STRONG min strength score", 40, 90, int(saved.ld_strong_score))
+        ld_expl_score = st.slider("EXPLOSIVE min strength score", 50, 95, int(saved.ld_explosive_score))
+        ld_max_age = st.slider("Late-entry filter: drop leaders older than (min)", 10, 180, int(saved.ld_max_age), 5)
+        ld_late_ext = st.slider("Late-entry filter: drop if already this many ORB-widths past the breakout", 0.25, 3.0,
+                                float(saved.ld_late_ext), 0.25)
+        ld_shorts = st.checkbox("Include breakdown (short / PE) leaders", bool(saved.ld_shorts))
+        ld_strike = st.selectbox("Option strike suggestion", ["ATM", "ITM-1", "OTM-1"], index=pick(["ATM", "ITM-1", "OTM-1"], saved.ld_strike_pref))
+        _wd = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+        expiry_weekday = st.selectbox("Monthly stock-option expiry weekday (verify with NSE)", list(range(5)),
+                                      index=min(int(saved.expiry_weekday), 4), format_func=lambda i: _wd[i])
+    with st.expander("Trend Ignition (open = low / open = high)"):
+        ig_window = st.slider("Ignition candle within first N minutes", 1, 60, int(saved.ig_window))
+        ig_vol = st.slider("Ignition candle volume vs avg minute (x)", 0.5, 10.0, float(saved.ig_vol), 0.5)
+        ig_open_tol = st.slider("Open within % of the candle's low/high", 0.0, 0.5, float(saved.ig_open_tol), 0.01)
+        ig_body = st.slider("Min body / range", 0.3, 0.9, float(saved.ig_body), 0.05)
+        ig_min_move = st.slider("Min body as % of price", 0.05, 2.0, float(saved.ig_min_move), 0.05)
+        ig_max_risk = st.slider("Skip if candle wider than (% of price)", 0.3, 5.0, float(saved.ig_max_risk_pct), 0.1)
     with st.expander("Telegram alerts"):
         tok = st.text_input("Bot token", os.environ.get("TELEGRAM_BOT_TOKEN", ""), type="password")
         chat = st.text_input("Chat ID", os.environ.get("TELEGRAM_CHAT_ID", ""))
@@ -106,7 +155,12 @@ with st.sidebar:
     cfg = E.Cfg(capital=capital, risk_pct=risk_pct, leverage=leverage, rr=rr, book_pct=book, orb_minutes=orb_minutes,
                 confirm_bars=confirm_bars, vol_mult=vol_mult, body_ratio=body_ratio, min_orb_pct=min_orb, max_orb_pct=max_orb,
                 last_entry=last_entry, trail_mode=trail_mode, trail_n=trail_n, atr_k=atr_k, eod_exit=eod_exit,
-                min_score=min_score, top_k=top_k, fresh_min=fresh_min, min_turnover_cr=min_turn)
+                min_score=min_score, top_k=top_k, fresh_min=fresh_min, min_turnover_cr=min_turn,
+                ld_min_price=ld_min_price, ld_min_turnover_cr=ld_min_turn, ld_spurt_vol=ld_spurt, ld_strong_vol=ld_strong,
+                ld_explosive_vol=ld_expl, ld_strong_score=ld_strong_score, ld_explosive_score=ld_expl_score, ld_max_age=ld_max_age,
+                ld_late_ext=ld_late_ext, ld_shorts=ld_shorts, ld_strike_pref=ld_strike, expiry_weekday=expiry_weekday,
+                ig_window=ig_window, ig_vol=ig_vol, ig_open_tol=ig_open_tol, ig_body=ig_body, ig_min_move=ig_min_move,
+                ig_max_risk_pct=ig_max_risk)
     if st.button("Save settings for backend monitor", use_container_width=True):
         E.save_cfg(cfg)
         st.success("Saved. monitor.py picks this up automatically.")
@@ -123,8 +177,9 @@ h4.metric("Backend", "monitor.py running" if store.monitor_alive() else "Dashboa
 symbols, industry, src = load_uni(universe)
 st.caption(f"{src}. Data: yfinance (unofficial, can lag - verify prices on your broker before placing orders).")
 
-tab_wl, tab_br, tab_sc, tab_desk, tab_tm = st.tabs(
-    ["1. Watchlist", "2. Market breadth", "3. Strong-buy scanner", "4. Live desk", "5. Trade manager"])
+(tab_ld, tab_ig, tab_gap, tab_rp, tab_jr, tab_wl, tab_br, tab_sc, tab_desk, tab_tm) = st.tabs(
+    ["💥 Breakout Leaders", "⚡ Trend Ignition", "🌅 Pre-Open Gaps", "▶ Day Replay", "📓 Journal",
+     "1. Watchlist", "2. Market breadth", "3. Strong-buy scanner", "4. Live desk", "5. Trade manager"])
 
 
 # ----------------------------------------------------------------------------- chart
@@ -470,3 +525,459 @@ with tab_tm:
         k2.metric("Win rate", f"{(hd['P&L ₹'] > 0).mean() * 100:.0f}%")
         k3.metric("Avg R", f"{hd['R'].mean():.2f}")
         st.dataframe(hd, hide_index=True, use_container_width=True)
+
+
+# =============================================================================================================
+# NEW: Breakout Leaders, Option strikes, Market mood + alerts, Trend Ignition, Pre-Open Gaps, Day Replay, Journal
+# =============================================================================================================
+fno_syms, fno_lots, fno_steps, fno_note = load_fno()
+fno_key = tuple(fno_syms)
+MOOD_COLOR = {"Bullish": "#2ec4a6", "Bearish": "#ef5b5b", "Neutral": "#f5b83d", "Unknown": "#8a8f98"}
+
+
+def _n(x, default=None):
+    """NaN / None safe value."""
+    return default if x is None or (isinstance(x, float) and np.isnan(x)) else x
+
+
+def mood_strip(b):
+    """Advance/decline breadth in one look."""
+    if not b:
+        st.info("Market mood appears after the first scan.")
+        return
+    adv, dec = int(b.get("adv", 0)), int(b.get("dec", 0))
+    tot = max(adv + dec, 1)
+    col = MOOD_COLOR.get(b["verdict"], "#8a8f98")
+    vw = b.get("n50_above_vwap")
+    extra = f" · Nifty 50 above VWAP {vw:.0f}%" if vw is not None and not np.isnan(vw) else ""
+    st.markdown(
+        f"<div style='padding:10px 14px;border-radius:10px;border:1px solid rgba(128,128,128,.3)'>"
+        f"<span style='background:{col};color:#111;padding:2px 10px;border-radius:12px;font-weight:700'>{b['verdict']}</span> "
+        f"<b>&nbsp;{adv} up</b> · <b>{dec} down</b>{extra} · 20-day highs/lows {b.get('new_highs', 0)}/{b.get('new_lows', 0)}"
+        f"<div style='display:flex;height:8px;margin-top:8px;border-radius:4px;overflow:hidden'>"
+        f"<div style='width:{adv / tot * 100:.1f}%;background:#2ec4a6'></div>"
+        f"<div style='width:{dec / tot * 100:.1f}%;background:#ef5b5b'></div></div></div>", unsafe_allow_html=True)
+
+
+# ----------------------------------------------------------------------------- 1-3. breakout leaders
+def run_leader_scan():
+    daily = load_fno_daily(fno_key)
+    data = load_fno_1m(fno_key)
+    b = load_breadth("F&O", daily, {s: "NA" for s in fno_syms})
+    board, stats = L.scan_leaders(fno_syms, cfg, daily, data, nifty_ret20(), b, fno_lots, fno_steps, industry)
+    st.session_state.update(ld_board=board, ld_stats=stats, ld_breadth=b, ld_time=E.now_ist())
+    return board
+
+
+def fire_leader_alerts(board, force):
+    """Telegram + toast + beep when a NEW, fresh, mood-compatible EXPLOSIVE leader appears."""
+    if board is None or board.empty or not (force or E.market_open()):
+        return
+    seen = st.session_state.setdefault("ld_alerted", set())
+    done = set(store.get_meta("ld_alerted", []) or [])          # shared with monitor.py so nothing is sent twice
+    day, new = E.now_ist().date().isoformat(), False
+    for r in board[(board.tier == "EXPLOSIVE") & board.mood_ok & (board.age_min <= cfg.fresh_min)].to_dict("records"):
+        k = f"{day}|{r['symbol']}|{r['side']}|{r['tier']}"
+        if k in seen or k in done:
+            continue
+        seen.add(k)
+        done.add(k)
+        new = True
+        text = L.leader_message(r)
+        st.toast(text, icon="💥")
+        store.add_event(f"💥 EXPLOSIVE {r['symbol']} {r['side']} score {r['score']:.0f}")
+        if tele and not store.monitor_alive():
+            E.notify(text)
+    store.set_meta("ld_alerted", sorted(done)[-500:])
+    if new:
+        beep()
+
+
+def leader_card(r):
+    long = r["side"] == "LONG"
+    o = r["opt"]
+    with st.container(border=True):
+        st.markdown(f"**{L.TIER_ICON[r['tier']]} #{r['rank']} {r['symbol']}**  ·  {'▲ LONG' if long else '▼ SHORT'}  ·  strength **{r['score']:.0f}**")
+        up = f" · upgraded to {r['tier']} at {r['tier_time']}" if r["tier_time"] != r["detect"] else ""
+        st.caption(f"🕐 Detected **{r['detect']}** IST · {r['age_min']:.0f} min ago{up}")
+        rv = _n(r["rvol"])
+        st.markdown(f"Volume jump **{r['vol_jump']}×**" + (f" · day RVOL {rv:.1f}×" if rv else ""))
+        st.markdown(f"📍 **{r['zone']}** · LTP **{r['price']}** ({r['day_chg']:+.2f}%)  \n"
+                    f"&nbsp;&nbsp;&nbsp;zone {r['zone_lo']} – {r['zone_hi']}")
+        st.markdown(f"🎯 ORB trigger **{'above' if long else 'below'} {r['trigger']}** · SL area **{r['sl']}**  \n"
+                    f"&nbsp;&nbsp;&nbsp;T1 {r['t1']} · T2 {r['t2']} · qty {r['qty']}")
+        lot = _n(o.get("lot"))
+        st.markdown(f"🧾 **{o['label']}** · premium ≈ **₹{o['prem_lo']}–{o['prem_hi']}** (est.)  \n"
+                    f"&nbsp;&nbsp;&nbsp;≈₹{o['prem_sl']} at SL · ≈₹{o['prem_t1']} at T1 · Δ {o['delta']}  \n"
+                    f"&nbsp;&nbsp;&nbsp;exp {o['expiry']}" + (f" · lot {int(lot)} ≈ ₹{o['lot_value']:,}" if lot else " · lot size unknown"))
+        if not r["mood_ok"]:
+            st.warning("⛔ Against today's market mood - skip or size down.")
+        if st.button("Track trade", key=f"ldtrk_{r['symbol']}"):
+            store.add_trade(E.new_trade(r["symbol"], L.sig_from_row(r), cfg))
+            st.toast(f"{r['symbol']} added to Trade manager.", icon="✅")
+
+
+with tab_ld:
+    st.markdown("**Leaders in 3 tiers - the strongest always on top.** The whole F&O universe passes a 3-layer quality filter; "
+                "whatever survives becomes a card.")
+    st.caption(f"{fno_note}. Option premiums are Black-Scholes estimates from recent realised volatility (yfinance has no NSE option chain) - "
+               "read the live premium and exact strike list from your broker.")
+    a1, a2, a3, a4 = st.columns([1, 1.6, 1, 1.6])
+    a1.button("Scan now", type="primary", key="ld_now_btn", on_click=lambda: st.session_state.update(ld_now=True))
+    ld_auto = a2.toggle("Live auto-scan (starts 09:16)", E.market_open(), key="ld_auto")
+    ld_every = a3.number_input("Every (sec)", 15, 300, 30, 15, key="ld_every")
+    ld_force = a4.checkbox("Test mode: ignore market hours", False, key="ld_force")
+    ld_max = st.slider("Cards per tier", 3, 20, 8, key="ld_max")
+
+    def leaders_panel():
+        after_916 = E.now_ist().hour * 60 + E.now_ist().minute >= 556
+        active = ld_auto and (ld_force or (E.market_open() and after_916))
+        if active or st.session_state.pop("ld_now", False):
+            with st.spinner(f"Scanning {len(fno_syms)} F&O stocks..."):
+                board = run_leader_scan()
+            fire_leader_alerts(board, ld_force)
+        board, stt, b = st.session_state.get("ld_board"), st.session_state.get("ld_stats"), st.session_state.get("ld_breadth")
+        mood_strip(b)
+        if board is None:
+            st.info("Click **Scan now** (or switch on Live auto-scan). The first scan downloads 1-minute data for the F&O universe, which takes a little while.")
+            return
+        st.caption(
+            f"Layer 1 removed **{stt['junk']}** junk/illiquid · Layer 2: **{stt['no_setup']}** had no valid ORB breakout · "
+            f"Layer 3 removed **{stt['late']}** late entries → **{stt['leaders']}** leaders"
+            + (f" ({stt['against_mood']} against market mood)" if stt["against_mood"] else "")
+            + (f" · {stt['no_data']} without data" if stt["no_data"] else "")
+            + f" · last scan {st.session_state['ld_time'].strftime('%H:%M:%S')}")
+        if board.empty:
+            st.warning("No leaders right now. Either nothing has broken out cleanly, or the market is closed / data is missing.")
+            return
+        cols = st.columns(3)
+        for col, tier in zip(cols, ["EXPLOSIVE", "STRONG", "SPURT"]):
+            sub = board[board.tier == tier]
+            with col:
+                st.markdown(f"#### {L.TIER_ICON[tier]} {tier}  ({len(sub)})")
+                if sub.empty:
+                    st.caption("none right now")
+                for r in sub.head(ld_max).to_dict("records"):
+                    leader_card(r)
+                if len(sub) > ld_max:
+                    st.caption(f"+{len(sub) - ld_max} more - raise 'Cards per tier'")
+
+    st.fragment(run_every=int(ld_every) if ld_auto else None)(leaders_panel)()
+
+
+# ----------------------------------------------------------------------------- 4. trend ignition
+with tab_ig:
+    st.markdown("**Catch the trend the minute it is born.** Stocks that do not break a range - they open *at* the day's low (or high) "
+                "on a strong, high-volume candle and never look back. Entry is printed from that very candle; a structure trail shows where the trade exits.")
+    i1, i2, i3 = st.columns([1, 1.6, 1])
+    i1.button("Scan now", type="primary", key="ig_now_btn", on_click=lambda: st.session_state.update(ig_now=True))
+    ig_auto = i2.toggle("Live auto-scan", E.market_open(), key="ig_auto")
+    ig_every = i3.number_input("Every (sec)", 15, 300, 30, 15, key="ig_every")
+
+    def ignition_panel():
+        if ig_auto or st.session_state.pop("ig_now", False):
+            with st.spinner("Looking for open-at-low / open-at-high candles..."):
+                st.session_state.ig = L.ignition_scan(fno_syms, cfg, load_fno_daily(fno_key), load_fno_1m(fno_key), nifty_ret20())
+                st.session_state.ig_time = E.now_ist()
+        res = st.session_state.get("ig")
+        if res is None:
+            st.info("Click **Scan now**. Detections start from the 09:15 candle - newest always on top.")
+            return
+        if res.empty:
+            st.warning("No ignition candles today (yet). They only form in the first minutes after the open.")
+            return
+        k = st.columns(4)
+        k[0].metric("Detections", len(res))
+        k[1].metric("Still running", int((res.status == "RUNNING").sum()))
+        k[2].metric("Exited", int(res.status.str.startswith("EXITED").sum()))
+        k[3].metric("Average P&L", f"{res.pnl_pct.mean():+.2f}%")
+        best = res.sort_values("pnl_pct").iloc[-1]
+        ex = f"EXIT ₹{best['exit']}" if _n(best["exit"]) else f"LTP ₹{best['last']}"
+        st.success(f"Best so far: **{best.symbol}** found at {best.detect} → {'BUY' if best.side == 'LONG' else 'SELL'} ₹{best.entry}, "
+                   f"{ex} → **{best.pnl_pct:+.2f}%**")
+        show = res.copy()
+        show["side"] = show.side.map({"LONG": "▲ BUY", "SHORT": "▼ SELL"})
+        st.dataframe(show, hide_index=True, use_container_width=True, height=520,
+                     column_order=["detect", "symbol", "side", "entry", "init_sl", "sl", "status", "exit", "exit_time", "last",
+                                   "pnl_pct", "mfe_pct", "r_mult", "vol_x"],
+                     column_config={"detect": "Detected", "init_sl": "Initial SL", "sl": "Trail SL now", "exit": "Exit ₹",
+                                    "exit_time": "Exit time", "last": "LTP", "pnl_pct": st.column_config.NumberColumn("P&L %", format="%.2f"),
+                                    "mfe_pct": st.column_config.NumberColumn("Best %", format="%.2f"),
+                                    "r_mult": st.column_config.NumberColumn("R", format="%.1f"), "vol_x": "Vol x"})
+        st.caption("Entry = close of the ignition candle. Trail = lowest low (highest high for shorts) of the last "
+                   f"{cfg.trail_n} bars. Simulated on 1-minute closes; real fills will differ. Last scan "
+                   f"{st.session_state['ig_time'].strftime('%H:%M:%S')}.")
+
+    st.fragment(run_every=int(ig_every) if ig_auto else None)(ignition_panel)()
+
+
+# ----------------------------------------------------------------------------- 5. pre-open gaps
+with tab_gap:
+    st.markdown("**Read the auction before the first candle.** The exchange's 09:00-09:15 pre-open auction sets the opening price; "
+                "the gap below is that open versus the previous close and is frozen at the bell. Trap flags mark where the crowd gets caught.")
+    g1, g2 = st.columns([1, 1])
+    gap_min = g1.slider("List gaps of at least (%)", 0.1, 3.0, 0.3, 0.1)
+    if g2.button("Load / refresh gaps", type="primary"):
+        load_fno_daily.clear()
+        st.session_state.gaps_on = True
+    if st.session_state.get("gaps_on"):
+        with st.spinner("Loading daily data for the F&O universe..."):
+            dly = load_fno_daily(fno_key)
+        gt, asof = L.gap_table(dly, fno_syms, cfg, nifty_ret20(), None, gap_min)
+        today_iso = E.now_ist().date().isoformat()
+        if gt.empty:
+            st.warning("No gap data available.")
+        else:
+            if asof != today_iso:
+                st.warning(f"Latest daily bar is {asof}, not today - the market has not opened yet (or is on holiday), so this shows that session's gaps.")
+            elif E.now_ist().hour * 60 + E.now_ist().minute >= 555 and L.freeze_gaps(gt, asof):
+                st.toast("Opening gaps frozen for today.", icon="🌅")
+                if tele and not store.monitor_alive():
+                    E.notify(L.gap_summary_message(gt, asof))
+            snap = store.get_meta(f"gaps:{asof}")
+            if snap:
+                st.caption(f"Frozen snapshot saved {snap['saved'][:16].replace('T', ' ')} IST for session {asof}.")
+            sel = gt[gt.gap_pct.abs() >= gap_min]
+            k = st.columns(4)
+            k[0].metric("Gap-up", int((sel.gap_pct > 0).sum()))
+            k[1].metric("Gap-down", int((sel.gap_pct < 0).sum()))
+            k[2].metric("Long traps", int((sel.trap == "LONG TRAP").sum()))
+            k[3].metric("Short traps", int((sel.trap == "SHORT TRAP").sum()))
+            cc = ["symbol", "gap_pct", "prev_close", "open", "ltp", "live_pct", "from_open_pct", "trap", "trap_state", "reason"]
+            cfgc = {"gap_pct": st.column_config.NumberColumn("Gap % (frozen)", format="%.2f"),
+                    "live_pct": st.column_config.NumberColumn("Live %", format="%.2f"),
+                    "from_open_pct": st.column_config.NumberColumn("From open %", format="%.2f"),
+                    "prev_close": "Prev close", "ltp": "LTP", "trap": "Trap flag", "trap_state": "State", "reason": "Why"}
+            u, d = st.columns(2)
+            with u:
+                st.markdown("**Gap-up**")
+                st.dataframe(sel[sel.gap_pct > 0].sort_values("gap_pct", ascending=False)[cc], hide_index=True,
+                             use_container_width=True, height=380, column_config=cfgc)
+            with d:
+                st.markdown("**Gap-down**")
+                st.dataframe(sel[sel.gap_pct < 0].sort_values("gap_pct")[cc], hide_index=True,
+                             use_container_width=True, height=380, column_config=cfgc)
+            traps = sel[sel.trap != ""]
+            st.markdown("**Trap watch** - SHORT TRAP = gap-down into an uptrend / oversold stock; LONG TRAP = gap-up into a downtrend / overbought stock. "
+                        "SPRUNG = price has since moved ≥0.5% against the gap. These are heuristics, not predictions.")
+            if traps.empty:
+                st.caption("No trap flags at this threshold.")
+            else:
+                st.dataframe(traps.sort_values("gap_pct")[cc], hide_index=True, use_container_width=True, column_config=cfgc)
+            st.caption("LTP / live % come from yfinance daily data (cached up to 10 min - press Load / refresh to update).")
+    else:
+        st.info("Click **Load / refresh gaps** after 09:15 (the open is frozen at the bell). Before the open you will see the previous session.")
+    with st.expander("Optional: NSE indicative pre-open prices (09:00-09:08)"):
+        st.caption("Experimental and untested against live NSE - NSE often blocks scripted requests. If it fails, the 09:15 open above is what you get.")
+        if st.button("Try NSE pre-open feed"):
+            po = L.fetch_nse_preopen()
+            if not po:
+                st.warning("NSE did not return pre-open data (blocked, or outside the auction window).")
+            else:
+                pdf = pd.DataFrame([{"symbol": k, **v} for k, v in po.items() if k in set(fno_syms)]).sort_values("pct", ascending=False)
+                st.dataframe(pdf.round(2), hide_index=True, use_container_width=True)
+
+
+# ----------------------------------------------------------------------------- 7. day replay
+def mini_chart(c):
+    long = c["side"] == "LONG"
+    col = "#2ec4a6" if long else "#ef5b5b"
+    xs = [L.hhmm(m) for m in c["m"]]
+    y = c["series"]
+    fig = go.Figure(go.Scatter(x=xs, y=y, mode="lines", line=dict(width=1.8, color=col), showlegend=False))
+    for v in (c["orb_high"], c["orb_low"]):
+        fig.add_hline(y=v, line=dict(color="#6ea8fe", dash="dot", width=1))
+    if c["first_m"] in c["m"]:
+        i = c["m"].index(c["first_m"])
+        fig.add_trace(go.Scatter(x=[xs[i]], y=[y[i]], mode="markers", showlegend=False,
+                                 marker=dict(symbol="triangle-up" if long else "triangle-down", size=11, color=col)))
+    lo, hi = min(y + [c["orb_low"]]), max(y + [c["orb_high"]])
+    pad = (hi - lo) * 0.08 or 1
+    fig.update_layout(template="plotly_dark", height=150, margin=dict(l=2, r=2, t=2, b=2), showlegend=False,
+                      xaxis=dict(visible=False), yaxis=dict(visible=False, range=[lo - pad, hi + pad]))
+    return fig
+
+
+with tab_rp:
+    st.markdown("**Rewatch the day exactly as it ran live.** Every leader pops back in at the exact minute it fired, with the badge and mini chart it had "
+                "*then*. Signals are recomputed bar by bar from data available at that minute (no hindsight), so yesterday becomes a zero-risk practice ground.")
+    _days, _d = [], E.now_ist().date()
+    while len(_days) < 6:
+        if _d.weekday() < 5:
+            _days.append(_d.isoformat())
+        _d -= timedelta(days=1)
+    r1, r2, r3 = st.columns([1.2, 1.6, 1.2])
+    build_day = r1.selectbox("Session to build", _days, help="yfinance keeps about 7 days of 1-minute history.")
+    if r2.button("Build replay pack (downloads F&O 1-minute data)", type="primary"):
+        with st.spinner("Downloading 1-minute bars and replaying the session bar by bar..."):
+            _data = load_fno_5d(fno_key)
+            _day = _date.fromisoformat(build_day)
+            if not any((df.index.date == _day).any() for df in _data.values()):
+                st.error("No 1-minute data for that date (holiday, or outside yfinance's 1-minute window).")
+            else:
+                _pk = L.build_pack(_data, load_fno_daily(fno_key), fno_syms, cfg, _day, nifty_ret20(), fno_lots, fno_steps)
+                st.session_state["rp_pick"] = build_day
+                st.session_state["rp_t"] = 570
+                st.success(f"Pack ready: {len(_pk['leaders'])} leaders.")
+    packs = sorted(L.pack_dates(), reverse=True)
+    if not packs:
+        st.info("No pack yet. Build one for a recent session - or run `python monitor.py --leaders`, which saves today's pack automatically after the close.")
+    else:
+        pick_day = r3.selectbox("Saved pack", packs, key="rp_pick")
+        pack = L.load_pack(pick_day)
+        st.caption(f"Pack for **{pack['date']}**: {len(pack['leaders'])} leaders · {len(pack['leaders'])} mini charts · arrivals minute-exact "
+                   f"· built {pack['built'][:16].replace('T', ' ')}")
+        MINS = list(range(555, 930))
+        st.session_state.setdefault("rp_t", 570)
+        st.session_state.setdefault("rp_running", False)
+        b1, b2, b3, b4, b5 = st.columns([1, 1, 1, 2.2, 1.4])
+        b1.button("▶ Play", key="rp_play", on_click=lambda: st.session_state.update(rp_running=True))
+        b2.button("⏸ Pause", key="rp_pause", on_click=lambda: st.session_state.update(rp_running=False))
+        b3.button("⏮ Restart", key="rp_restart", on_click=lambda: st.session_state.update(rp_t=555, rp_running=False))
+        rp_speed = b4.select_slider("Speed (market minutes per second)", [1, 2, 5, 10, 15], value=5, key="rp_speed")
+        rp_n = b5.slider("Cards shown", 3, 24, 9, key="rp_n")
+        _running = bool(st.session_state.get("rp_running"))
+
+        def replay_panel(pack):
+            finished = False
+            if st.session_state.get("rp_running"):
+                nt = st.session_state.rp_t + int(st.session_state.get("rp_speed", 5))
+                if nt >= MINS[-1]:
+                    nt, finished = MINS[-1], True
+                    st.session_state.rp_running = False
+                st.session_state.rp_t = nt
+            t = st.select_slider("Replay clock", MINS, key="rp_t", format_func=L.hhmm)
+            cards = L.replay_cards(pack, t)
+            st.markdown(f"### {L.hhmm(t)} IST - {len(cards)} leaders on the board")
+            if not cards:
+                st.caption("Nothing has fired yet. Leaders can only appear after the opening range forms.")
+            grid = st.columns(3)
+            for i, c in enumerate(cards[:rp_n]):
+                with grid[i % 3].container(border=True):
+                    o = c["opt"]
+                    st.markdown(f"**{L.TIER_ICON[c['tier']]} {c['tier']} · {c['symbol']}** {'▲' if c['side'] == 'LONG' else '▼'} "
+                                f"· {c['score']:.0f}" + ("  🆕" if c["fresh"] else ""))
+                    up = f" · upgraded {L.hhmm(c['cur_m'])}" if c["upgraded"] else ""
+                    st.caption(f"🕐 fired {L.hhmm(c['first_m'])}{up} · volume {c['vol']}×")
+                    st.plotly_chart(mini_chart(c), use_container_width=True, key=f"rpmc_{i}", config={"displayModeBar": False})
+                    st.caption(f"Trigger {c['orb_high'] if c['side'] == 'LONG' else c['orb_low']} · SL {c['sl']} · T1 {c['t1']} · "
+                               f"{o['label']} ≈ ₹{o['prem_lo']}–{o['prem_hi']} (est.)")
+            with st.expander("Arrivals feed", expanded=False):
+                for m, txt in L.replay_feed(pack, t, 15):
+                    st.write(f"`{L.hhmm(m)}`  {txt}")
+            if finished:
+                st.rerun()
+
+        st.fragment(run_every=1 if _running else None)(replay_panel)(pack)
+
+
+# ----------------------------------------------------------------------------- 6. journal
+with tab_jr:
+    st.markdown("**Every trade logged, every lesson remembered.** Log a trade in seconds; stats, equity curve, calendar and insights build themselves.")
+    jkey = st.text_input("Access key", type="password", key="jr_key",
+                         help="Your journal is filed under a hash of this key and is never shown under any other key. "
+                              "To use the same journal on phone and PC, open this same app (one server) on both and enter the same key.")
+    if not jkey.strip():
+        st.info("Enter an access key to open your private journal (choose anything you will remember - there is no recovery).")
+    else:
+        owner = J.owner_hash(jkey)
+        with st.expander("➕ Log a trade", expanded=True):
+            c = st.columns(5)
+            j_date = c[0].date_input("Date", E.now_ist().date(), key="j_date")
+            j_sym = c[1].text_input("Symbol", key="j_sym").strip().upper()
+            j_inst = c[2].radio("Instrument", ["Equity", "Option"], horizontal=True, key="j_inst")
+            j_side = c[3].selectbox("Side", ["LONG", "SHORT"], key="j_side", help="For options, LONG = you bought the premium.")
+            j_setup = c[4].selectbox("Setup", J.SETUPS, key="j_setup")
+            c = st.columns(5)
+            j_entry = c[0].number_input("Entry", 0.0, 1e7, 0.0, 0.05, key="j_entry")
+            j_sl = c[1].number_input("Stop-loss", 0.0, 1e7, 0.0, 0.05, key="j_sl")
+            j_tgt = c[2].number_input("Target", 0.0, 1e7, 0.0, 0.05, key="j_tgt")
+            j_exit = c[3].number_input("Exit", 0.0, 1e7, 0.0, 0.05, key="j_exit")
+            j_charges = c[4].number_input("Charges ₹", 0.0, 1e6, 0.0, 10.0, key="j_charges")
+            c = st.columns(5)
+            lot_known = _n(fno_lots.get(j_sym))
+            if j_inst == "Option":
+                j_strike = c[0].text_input("Option strike", placeholder="e.g. 2400 CE", key="j_strike")
+                j_lots = c[1].number_input("Lots", 1, 100000, 1, key="j_lots")
+                if lot_known:
+                    lot_size = int(lot_known)
+                    c[2].markdown(f"Lot size **{lot_size}** (auto)")
+                else:
+                    lot_size = int(c[2].number_input("Lot size", 1, 1000000, 1, key="j_lotsize",
+                                                     help="Not found for this symbol - enter it, or add it to cache/fno_lots.csv."))
+                j_qty = int(j_lots) * lot_size
+                c[3].markdown(f"Quantity **{j_qty:,}**  \n= {j_lots} lot × {lot_size}")
+            else:
+                j_strike, j_lots, lot_size = "", 0, 0
+                j_qty = int(c[0].number_input("Quantity", 1, 10_000_000, 1, key="j_qty"))
+            j_tin = c[4].time_input("Entry time", _time(9, 30), key="j_tin")
+            c = st.columns([1, 1, 3])
+            j_tout = c[0].time_input("Exit time", _time(10, 0), key="j_tout")
+            j_mist = c[1].selectbox("Mistake (if any)", J.MISTAKES, key="j_mist")
+            j_note = c[2].text_input("Note", key="j_note")
+            if st.button("Save trade", type="primary", key="j_save"):
+                if not j_sym or j_entry <= 0 or j_exit <= 0 or j_qty <= 0:
+                    st.error("Symbol, entry, exit and quantity are required.")
+                else:
+                    store.add_journal(owner, dict(
+                        date=j_date.isoformat(), symbol=j_sym, side=j_side, instrument=j_inst, setup=j_setup, entry=j_entry, sl=j_sl,
+                        target=j_tgt, exit=j_exit, qty=j_qty, lots=int(j_lots), lot_size=int(lot_size), strike=j_strike,
+                        entry_time=j_tin.strftime("%H:%M"), exit_time=j_tout.strftime("%H:%M"), mistake=j_mist,
+                        charges=j_charges, note=j_note))
+                    st.toast("Trade logged.", icon="📓")
+                    st.rerun()
+        if st.button("Import closed trades from the Trade manager"):
+            done = set(store.get_meta(f"jr_imported:{owner}", []) or [])
+            added = 0
+            for t in store.closed_trades(500):
+                if t["id"] in done or t.get("exit_price") is None:
+                    continue
+                oa, ca = pd.Timestamp(t["opened_at"]), pd.Timestamp(t["closed_at"])
+                store.add_journal(owner, dict(
+                    date=ca.date().isoformat(), symbol=t["symbol"], side=t["side"], instrument="Equity", setup="ORB scanner (strong buy)",
+                    entry=t["entry"], sl=t["init_sl"], target=t["targets"][1], exit=t["exit_price"], qty=t["qty"],
+                    entry_time=oa.strftime("%H:%M"), exit_time=ca.strftime("%H:%M"), mistake="None", charges=0.0,
+                    pnl_override=t["pnl"], note=f"imported trade #{t['id']} ({t['close_reason']})"))
+                done.add(t["id"])
+                added += 1
+            store.set_meta(f"jr_imported:{owner}", sorted(done))
+            st.success(f"Imported {added} trade(s).") if added else st.info("Nothing new to import.")
+            if added:
+                st.rerun()
+
+        jdf = J.to_frame(store.journal_list(owner))
+        if jdf.empty:
+            st.info("No trades logged yet.")
+        else:
+            S = J.stats(jdf)
+            m = st.columns(6)
+            m[0].metric("Trades", S["trades"])
+            m[1].metric("Net P&L", f"₹{S['net']:,.0f}")
+            m[2].metric("Win rate", f"{S['win_rate']:.0f}%")
+            m[3].metric("Profit factor", "∞" if S["profit_factor"] == float("inf") else f"{S['profit_factor']:.2f}")
+            m[4].metric("Avg R", "n/a" if S["avg_r"] is None else f"{S['avg_r']:.2f}")
+            m[5].metric("Avg hold", "n/a" if S["avg_hold"] is None else f"{S['avg_hold']:.0f} min")
+            st.markdown("**Auto insights**")
+            for line in J.insights(jdf):
+                st.markdown(f"- {line}")
+            e1, e2 = st.columns([3, 2])
+            with e1:
+                fig = go.Figure(go.Scatter(x=list(range(1, len(jdf) + 1)), y=jdf.equity, mode="lines+markers", text=jdf.symbol,
+                                           line=dict(color="#6ea8fe", width=2), hovertemplate="%{text}: ₹%{y:,.0f}<extra></extra>"))
+                fig.update_layout(template="plotly_dark", height=320, title=f"Equity curve (max drawdown ₹{S['max_dd']:,.0f})",
+                                  xaxis_title="Trade #", margin=dict(l=10, r=10, t=40, b=10))
+                st.plotly_chart(fig, use_container_width=True)
+            with e2:
+                ym = sorted({(d.year, d.month) for d in jdf.date}, reverse=True)
+                pick_m = st.selectbox("Calendar month", ym, format_func=lambda x: f"{x[0]}-{x[1]:02d}", key="jr_month")
+                st.markdown(J.calendar_html(jdf, pick_m[0], pick_m[1]), unsafe_allow_html=True)
+            view = jdf.assign(date=jdf.date.dt.strftime("%Y-%m-%d"))
+            st.dataframe(view[[c_ for c_ in ["id", "date", "symbol", "side", "instrument", "setup", "strike", "qty", "entry", "sl", "target",
+                                             "exit", "entry_time", "exit_time", "hold_min", "pnl", "r", "mistake", "note"] if c_ in view.columns]],
+                         hide_index=True, use_container_width=True)
+            x1, x2, x3 = st.columns([2, 1, 1])
+            del_id = x1.selectbox("Delete entry", list(view["id"]), format_func=lambda i: f"#{i} " + str(view[view['id'] == i].iloc[0].symbol))
+            if x2.button("Delete"):
+                store.journal_delete(owner, int(del_id))
+                st.rerun()
+            x3.download_button("Export CSV", J.csv_bytes(jdf), "trading_journal.csv", "text/csv")
