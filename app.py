@@ -17,8 +17,10 @@ import journal as J
 import leaders as L
 import store
 import ui as U
+import auth
 
 st.set_page_config(page_title="ORB Command Center", page_icon="📈", layout="wide")
+auth.require_login()
 store.init()
 
 
@@ -99,6 +101,7 @@ def pick(options, val, fallback=0):
 saved = E.load_cfg()
 with st.sidebar:
     st.title("ORB Command Center")
+    auth.logout_button()
     universe = st.selectbox("Universe", list(E.NSE_LISTS), index=2)
     with st.expander("Risk", expanded=True):
         capital = st.number_input("Capital (₹)", 10000.0, 1e9, float(saved.capital), 10000.0)
