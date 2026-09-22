@@ -16,6 +16,7 @@ import fno as F
 import journal as J
 import leaders as L
 import store
+import ui as U
 
 st.set_page_config(page_title="ORB Command Center", page_icon="📈", layout="wide")
 store.init()
@@ -542,21 +543,8 @@ def _n(x, default=None):
 
 def mood_strip(b):
     """Advance/decline breadth in one look."""
-    if not b:
-        st.info("Market mood appears after the first scan.")
-        return
-    adv, dec = int(b.get("adv", 0)), int(b.get("dec", 0))
-    tot = max(adv + dec, 1)
-    col = MOOD_COLOR.get(b["verdict"], "#8a8f98")
-    vw = b.get("n50_above_vwap")
-    extra = f" · Nifty 50 above VWAP {vw:.0f}%" if vw is not None and not np.isnan(vw) else ""
-    st.markdown(
-        f"<div style='padding:10px 14px;border-radius:10px;border:1px solid rgba(128,128,128,.3)'>"
-        f"<span style='background:{col};color:#111;padding:2px 10px;border-radius:12px;font-weight:700'>{b['verdict']}</span> "
-        f"<b>&nbsp;{adv} up</b> · <b>{dec} down</b>{extra} · 20-day highs/lows {b.get('new_highs', 0)}/{b.get('new_lows', 0)}"
-        f"<div style='display:flex;height:8px;margin-top:8px;border-radius:4px;overflow:hidden'>"
-        f"<div style='width:{adv / tot * 100:.1f}%;background:#2ec4a6'></div>"
-        f"<div style='width:{dec / tot * 100:.1f}%;background:#ef5b5b'></div></div></div>", unsafe_allow_html=True)
+    html_, h = U.breadth_html(b)
+    components.html(html_, height=h, scrolling=False)
 
 
 # ----------------------------------------------------------------------------- 1-3. breakout leaders
@@ -593,33 +581,7 @@ def fire_leader_alerts(board, force):
         beep()
 
 
-def leader_card(r):
-    long = r["side"] == "LONG"
-    o = r["opt"]
-    with st.container(border=True):
-        st.markdown(f"**{L.TIER_ICON[r['tier']]} #{r['rank']} {r['symbol']}**  ·  {'▲ LONG' if long else '▼ SHORT'}  ·  strength **{r['score']:.0f}**")
-        up = f" · upgraded to {r['tier']} at {r['tier_time']}" if r["tier_time"] != r["detect"] else ""
-        st.caption(f"🕐 Detected **{r['detect']}** IST · {r['age_min']:.0f} min ago{up}")
-        rv = _n(r["rvol"])
-        st.markdown(f"Volume jump **{r['vol_jump']}×**" + (f" · day RVOL {rv:.1f}×" if rv else ""))
-        st.markdown(f"📍 **{r['zone']}** · LTP **{r['price']}** ({r['day_chg']:+.2f}%)  \n"
-                    f"&nbsp;&nbsp;&nbsp;zone {r['zone_lo']} – {r['zone_hi']}")
-        st.markdown(f"🎯 ORB trigger **{'above' if long else 'below'} {r['trigger']}** · SL area **{r['sl']}**  \n"
-                    f"&nbsp;&nbsp;&nbsp;T1 {r['t1']} · T2 {r['t2']} · qty {r['qty']}")
-        lot = _n(o.get("lot"))
-        st.markdown(f"🧾 **{o['label']}** · premium ≈ **₹{o['prem_lo']}–{o['prem_hi']}** (est.)  \n"
-                    f"&nbsp;&nbsp;&nbsp;≈₹{o['prem_sl']} at SL · ≈₹{o['prem_t1']} at T1 · Δ {o['delta']}  \n"
-                    f"&nbsp;&nbsp;&nbsp;exp {o['expiry']}" + (f" · lot {int(lot)} ≈ ₹{o['lot_value']:,}" if lot else " · lot size unknown"))
-        if not r["mood_ok"]:
-            st.warning("⛔ Against today's market mood - skip or size down.")
-        if st.button("Track trade", key=f"ldtrk_{r['symbol']}"):
-            store.add_trade(E.new_trade(r["symbol"], L.sig_from_row(r), cfg))
-            st.toast(f"{r['symbol']} added to Trade manager.", icon="✅")
-
-
 with tab_ld:
-    st.markdown("**Leaders in 3 tiers - the strongest always on top.** The whole F&O universe passes a 3-layer quality filter; "
-                "whatever survives becomes a card.")
     st.caption(f"{fno_note}. Option premiums are Black-Scholes estimates from recent realised volatility (yfinance has no NSE option chain) - "
                "read the live premium and exact strike list from your broker.")
     a1, a2, a3, a4 = st.columns([1, 1.6, 1, 1.6])
@@ -641,26 +603,21 @@ with tab_ld:
         if board is None:
             st.info("Click **Scan now** (or switch on Live auto-scan). The first scan downloads 1-minute data for the F&O universe, which takes a little while.")
             return
-        st.caption(
-            f"Layer 1 removed **{stt['junk']}** junk/illiquid · Layer 2: **{stt['no_setup']}** had no valid ORB breakout · "
-            f"Layer 3 removed **{stt['late']}** late entries → **{stt['leaders']}** leaders"
-            + (f" ({stt['against_mood']} against market mood)" if stt["against_mood"] else "")
-            + (f" · {stt['no_data']} without data" if stt["no_data"] else "")
-            + f" · last scan {st.session_state['ld_time'].strftime('%H:%M:%S')}")
+        counts = {t: int((board.tier == t).sum()) for t in ("SPURT", "STRONG", "EXPLOSIVE")} if not board.empty else {t: 0 for t in ("SPURT", "STRONG", "EXPLOSIVE")}
+        tb_html, tb_h = U.leaders_toolbar_html(stt, b, int(ld_every), ld_auto, st.session_state["ld_time"].strftime("%H:%M:%S"),
+                                               counts, cfg.ld_spurt_vol, cfg.confirm_bars * 4 + 3)
+        components.html(tb_html, height=tb_h, scrolling=False)
         if board.empty:
             st.warning("No leaders right now. Either nothing has broken out cleanly, or the market is closed / data is missing.")
             return
-        cols = st.columns(3)
-        for col, tier in zip(cols, ["EXPLOSIVE", "STRONG", "SPURT"]):
-            sub = board[board.tier == tier]
-            with col:
-                st.markdown(f"#### {L.TIER_ICON[tier]} {tier}  ({len(sub)})")
-                if sub.empty:
-                    st.caption("none right now")
-                for r in sub.head(ld_max).to_dict("records"):
-                    leader_card(r)
-                if len(sub) > ld_max:
-                    st.caption(f"+{len(sub) - ld_max} more - raise 'Cards per tier'")
+        bd_html, bd_h = U.leaders_board_html(board, ld_max)
+        components.html(bd_html, height=bd_h, scrolling=True)
+        with st.expander("Track a leader as a trade"):
+            pick = st.selectbox("Symbol", board.symbol.tolist(), key="ld_track_pick")
+            if st.button("Track trade", key="ld_track_btn"):
+                r = board[board.symbol == pick].iloc[0].to_dict()
+                store.add_trade(E.new_trade(r["symbol"], L.sig_from_row(r), cfg))
+                st.toast(f"{r['symbol']} added to Trade manager.", icon="✅")
 
     st.fragment(run_every=int(ld_every) if ld_auto else None)(leaders_panel)()
 
@@ -695,18 +652,21 @@ with tab_ig:
         ex = f"EXIT ₹{best['exit']}" if _n(best["exit"]) else f"LTP ₹{best['last']}"
         st.success(f"Best so far: **{best.symbol}** found at {best.detect} → {'BUY' if best.side == 'LONG' else 'SELL'} ₹{best.entry}, "
                    f"{ex} → **{best.pnl_pct:+.2f}%**")
-        show = res.copy()
-        show["side"] = show.side.map({"LONG": "▲ BUY", "SHORT": "▼ SELL"})
-        st.dataframe(show, hide_index=True, use_container_width=True, height=520,
-                     column_order=["detect", "symbol", "side", "entry", "init_sl", "sl", "status", "exit", "exit_time", "last",
-                                   "pnl_pct", "mfe_pct", "r_mult", "vol_x"],
-                     column_config={"detect": "Detected", "init_sl": "Initial SL", "sl": "Trail SL now", "exit": "Exit ₹",
-                                    "exit_time": "Exit time", "last": "LTP", "pnl_pct": st.column_config.NumberColumn("P&L %", format="%.2f"),
-                                    "mfe_pct": st.column_config.NumberColumn("Best %", format="%.2f"),
-                                    "r_mult": st.column_config.NumberColumn("R", format="%.1f"), "vol_x": "Vol x"})
-        st.caption("Entry = close of the ignition candle. Trail = lowest low (highest high for shorts) of the last "
+        ig_html, ig_h = U.ignition_html(res)
+        components.html(ig_html, height=ig_h, scrolling=True)
+        st.caption("Entry = close of the detection candle. Trail = lowest low (highest high for shorts) of the last "
                    f"{cfg.trail_n} bars. Simulated on 1-minute closes; real fills will differ. Last scan "
                    f"{st.session_state['ig_time'].strftime('%H:%M:%S')}.")
+        with st.expander("Full table"):
+            show = res.copy()
+            show["side"] = show.side.map({"LONG": "▲ BUY", "SHORT": "▼ SELL"})
+            st.dataframe(show, hide_index=True, use_container_width=True, height=420,
+                         column_order=["detect", "symbol", "side", "entry", "init_sl", "sl", "status", "exit", "exit_time", "last",
+                                       "pnl_pct", "mfe_pct", "r_mult", "vol_x"],
+                         column_config={"detect": "Detected", "init_sl": "Initial SL", "sl": "Trail SL now", "exit": "Exit ₹",
+                                        "exit_time": "Exit time", "last": "LTP", "pnl_pct": st.column_config.NumberColumn("P&L %", format="%.2f"),
+                                        "mfe_pct": st.column_config.NumberColumn("Best %", format="%.2f"),
+                                        "r_mult": st.column_config.NumberColumn("R", format="%.1f"), "vol_x": "Vol x"})
 
     st.fragment(run_every=int(ig_every) if ig_auto else None)(ignition_panel)()
 
@@ -723,7 +683,7 @@ with tab_gap:
     if st.session_state.get("gaps_on"):
         with st.spinner("Loading daily data for the F&O universe..."):
             dly = load_fno_daily(fno_key)
-        gt, asof = L.gap_table(dly, fno_syms, cfg, nifty_ret20(), None, gap_min)
+        gt, asof = L.gap_table(dly, fno_syms, cfg, nifty_ret20(), None, gap_min, st.session_state.get("gaps_preopen"))
         today_iso = E.now_ist().date().isoformat()
         if gt.empty:
             st.warning("No gap data available.")
@@ -737,33 +697,17 @@ with tab_gap:
             snap = store.get_meta(f"gaps:{asof}")
             if snap:
                 st.caption(f"Frozen snapshot saved {snap['saved'][:16].replace('T', ' ')} IST for session {asof}.")
-            sel = gt[gt.gap_pct.abs() >= gap_min]
-            k = st.columns(4)
-            k[0].metric("Gap-up", int((sel.gap_pct > 0).sum()))
-            k[1].metric("Gap-down", int((sel.gap_pct < 0).sum()))
-            k[2].metric("Long traps", int((sel.trap == "LONG TRAP").sum()))
-            k[3].metric("Short traps", int((sel.trap == "SHORT TRAP").sum()))
-            cc = ["symbol", "gap_pct", "prev_close", "open", "ltp", "live_pct", "from_open_pct", "trap", "trap_state", "reason"]
-            cfgc = {"gap_pct": st.column_config.NumberColumn("Gap % (frozen)", format="%.2f"),
-                    "live_pct": st.column_config.NumberColumn("Live %", format="%.2f"),
-                    "from_open_pct": st.column_config.NumberColumn("From open %", format="%.2f"),
-                    "prev_close": "Prev close", "ltp": "LTP", "trap": "Trap flag", "trap_state": "State", "reason": "Why"}
-            u, d = st.columns(2)
-            with u:
-                st.markdown("**Gap-up**")
-                st.dataframe(sel[sel.gap_pct > 0].sort_values("gap_pct", ascending=False)[cc], hide_index=True,
-                             use_container_width=True, height=380, column_config=cfgc)
-            with d:
-                st.markdown("**Gap-down**")
-                st.dataframe(sel[sel.gap_pct < 0].sort_values("gap_pct")[cc], hide_index=True,
-                             use_container_width=True, height=380, column_config=cfgc)
-            traps = sel[sel.trap != ""]
-            st.markdown("**Trap watch** - SHORT TRAP = gap-down into an uptrend / oversold stock; LONG TRAP = gap-up into a downtrend / overbought stock. "
-                        "SPRUNG = price has since moved ≥0.5% against the gap. These are heuristics, not predictions.")
-            if traps.empty:
-                st.caption("No trap flags at this threshold.")
-            else:
-                st.dataframe(traps.sort_values("gap_pct")[cc], hide_index=True, use_container_width=True, column_config=cfgc)
+            po = st.session_state.get("gaps_preopen") or {}
+            gp_html, gp_h = U.gaps_html(gt, gap_min, E.now_ist().strftime("%H:%M"), asof, has_bs=bool(po))
+            components.html(gp_html, height=gp_h, scrolling=False)
+            with st.expander("Full table"):
+                sel = gt[gt.gap_pct.abs() >= gap_min]
+                cc = ["symbol", "gap_pct", "prev_close", "open", "ltp", "live_pct", "from_open_pct", "trap", "trap_state", "reason"]
+                cfgc = {"gap_pct": st.column_config.NumberColumn("Gap % (frozen)", format="%.2f"),
+                        "live_pct": st.column_config.NumberColumn("Live %", format="%.2f"),
+                        "from_open_pct": st.column_config.NumberColumn("From open %", format="%.2f"),
+                        "prev_close": "Prev close", "ltp": "LTP", "trap": "Trap flag", "trap_state": "State", "reason": "Why"}
+                st.dataframe(sel.sort_values("gap_pct", ascending=False)[cc], hide_index=True, use_container_width=True, column_config=cfgc)
             st.caption("LTP / live % come from yfinance daily data (cached up to 10 min - press Load / refresh to update).")
     else:
         st.info("Click **Load / refresh gaps** after 09:15 (the open is frozen at the bell). Before the open you will see the previous session.")
@@ -774,8 +718,10 @@ with tab_gap:
             if not po:
                 st.warning("NSE did not return pre-open data (blocked, or outside the auction window).")
             else:
+                st.session_state.gaps_preopen = po
                 pdf = pd.DataFrame([{"symbol": k, **v} for k, v in po.items() if k in set(fno_syms)]).sort_values("pct", ascending=False)
                 st.dataframe(pdf.round(2), hide_index=True, use_container_width=True)
+                st.success("B/S chip will now show on the gap table above (re-open this tab / click Load again).")
 
 
 # ----------------------------------------------------------------------------- 7. day replay
@@ -848,20 +794,10 @@ with tab_rp:
                 st.session_state.rp_t = nt
             t = st.select_slider("Replay clock", MINS, key="rp_t", format_func=L.hhmm)
             cards = L.replay_cards(pack, t)
-            st.markdown(f"### {L.hhmm(t)} IST - {len(cards)} leaders on the board")
-            if not cards:
-                st.caption("Nothing has fired yet. Leaders can only appear after the opening range forms.")
-            grid = st.columns(3)
-            for i, c in enumerate(cards[:rp_n]):
-                with grid[i % 3].container(border=True):
-                    o = c["opt"]
-                    st.markdown(f"**{L.TIER_ICON[c['tier']]} {c['tier']} · {c['symbol']}** {'▲' if c['side'] == 'LONG' else '▼'} "
-                                f"· {c['score']:.0f}" + ("  🆕" if c["fresh"] else ""))
-                    up = f" · upgraded {L.hhmm(c['cur_m'])}" if c["upgraded"] else ""
-                    st.caption(f"🕐 fired {L.hhmm(c['first_m'])}{up} · volume {c['vol']}×")
-                    st.plotly_chart(mini_chart(c), use_container_width=True, key=f"rpmc_{i}", config={"displayModeBar": False})
-                    st.caption(f"Trigger {c['orb_high'] if c['side'] == 'LONG' else c['orb_low']} · SL {c['sl']} · T1 {c['t1']} · "
-                               f"{o['label']} ≈ ₹{o['prem_lo']}–{o['prem_hi']} (est.)")
+            n_charts = sum(1 for c in cards if len(c["series"]) > 1)
+            st.markdown(f"**▶ Day Replay — the day as it ran live**  \nPacked {pack['built'][11:16]} · {len(pack['leaders'])} leaders · {n_charts} charts")
+            rp_html, rp_h = U.replay_html(cards, per_col=rp_n, step=max(int(st.session_state.get("rp_speed", 5)) // 2, 1))
+            components.html(rp_html, height=rp_h, scrolling=True)
             with st.expander("Arrivals feed", expanded=False):
                 for m, txt in L.replay_feed(pack, t, 15):
                     st.write(f"`{L.hhmm(m)}`  {txt}")
@@ -950,33 +886,14 @@ with tab_jr:
             st.info("No trades logged yet.")
         else:
             S = J.stats(jdf)
-            m = st.columns(6)
-            m[0].metric("Trades", S["trades"])
-            m[1].metric("Net P&L", f"₹{S['net']:,.0f}")
-            m[2].metric("Win rate", f"{S['win_rate']:.0f}%")
-            m[3].metric("Profit factor", "∞" if S["profit_factor"] == float("inf") else f"{S['profit_factor']:.2f}")
-            m[4].metric("Avg R", "n/a" if S["avg_r"] is None else f"{S['avg_r']:.2f}")
-            m[5].metric("Avg hold", "n/a" if S["avg_hold"] is None else f"{S['avg_hold']:.0f} min")
-            st.markdown("**Auto insights**")
-            for line in J.insights(jdf):
-                st.markdown(f"- {line}")
-            e1, e2 = st.columns([3, 2])
-            with e1:
-                fig = go.Figure(go.Scatter(x=list(range(1, len(jdf) + 1)), y=jdf.equity, mode="lines+markers", text=jdf.symbol,
-                                           line=dict(color="#6ea8fe", width=2), hovertemplate="%{text}: ₹%{y:,.0f}<extra></extra>"))
-                fig.update_layout(template="plotly_dark", height=320, title=f"Equity curve (max drawdown ₹{S['max_dd']:,.0f})",
-                                  xaxis_title="Trade #", margin=dict(l=10, r=10, t=40, b=10))
-                st.plotly_chart(fig, use_container_width=True)
-            with e2:
-                ym = sorted({(d.year, d.month) for d in jdf.date}, reverse=True)
-                pick_m = st.selectbox("Calendar month", ym, format_func=lambda x: f"{x[0]}-{x[1]:02d}", key="jr_month")
-                st.markdown(J.calendar_html(jdf, pick_m[0], pick_m[1]), unsafe_allow_html=True)
-            view = jdf.assign(date=jdf.date.dt.strftime("%Y-%m-%d"))
-            st.dataframe(view[[c_ for c_ in ["id", "date", "symbol", "side", "instrument", "setup", "strike", "qty", "entry", "sl", "target",
-                                             "exit", "entry_time", "exit_time", "hold_min", "pnl", "r", "mistake", "note"] if c_ in view.columns]],
-                         hide_index=True, use_container_width=True)
+            cards = J.insight_cards(jdf)
+            ym = sorted({(d.year, d.month) for d in jdf.date}, reverse=True)
+            jc1, jc2 = st.columns([1, 5])
+            pick_m = jc1.selectbox("Calendar month", ym, format_func=lambda x: f"{x[0]}-{x[1]:02d}", key="jr_month")
+            jr_html, jr_h = U.journal_html(jdf, jdf, S, cards, pick_m[0], pick_m[1], E.now_ist().date())
+            components.html(jr_html, height=jr_h, scrolling=True)
             x1, x2, x3 = st.columns([2, 1, 1])
-            del_id = x1.selectbox("Delete entry", list(view["id"]), format_func=lambda i: f"#{i} " + str(view[view['id'] == i].iloc[0].symbol))
+            del_id = x1.selectbox("Delete entry", list(jdf["id"]), format_func=lambda i: f"#{i} " + str(jdf[jdf['id'] == i].iloc[0].symbol))
             if x2.button("Delete"):
                 store.journal_delete(owner, int(del_id))
                 st.rerun()

@@ -27,6 +27,13 @@ For real F&O data drop NSE's `fo_mktlots.csv` into `./cache/` (it is also downlo
 
 The original five tabs (Watchlist, Market breadth, Strong-buy scanner, Live desk, Trade manager) are unchanged.
 
+## Look and feel
+The Breakout Leaders board, Trend Ignition cards, Pre-Open Gaps panel, Day Replay board and Journal dashboard are
+rendered as self-contained HTML/CSS (`ui.py`) via `streamlit.components.v1.html(...)`, not native Streamlit widgets -
+this is what gives the gradient tier headers, conviction bars, ★ watch badges, sparkline replay cards and the 2×2
+gaps panel their look. `app.py` still uses native Streamlit controls (buttons, toggles, sliders) around each panel
+for the interactive parts (scan now, live auto-scan, speed, etc).
+
 ## How the rules work
 
 **Leaders - 3 layers**
@@ -53,7 +60,12 @@ The original five tabs (Watchlist, Market breadth, Strong-buy scanner, Live desk
 
 ## Tests
 ```bash
-python tests/test_logic.py   # 70 checks on synthetic data: tiers, filters, no-lookahead, ignition, gaps, replay, options, journal
-python tests/smoke_app.py    # executes app.py end-to-end with a fake Streamlit (no rendering check)
+python tests/test_logic.py   # 70+ checks on synthetic data: tiers, filters, no-lookahead, ignition, gaps, replay, options, journal
+python tests/smoke_app.py    # executes app.py end-to-end with a fake Streamlit, incl. journal HTML regression checks
 ```
-These use synthetic data only; nothing here has been run against live yfinance / NSE.
+These use synthetic data only; nothing here has been run against live yfinance / NSE. The HTML panels in `ui.py`
+were additionally checked by rendering them to PNG with `wkhtmltoimage` against synthetic data shaped like the
+reference screenshots (gap-up/down/trap stocks, opening-surge and delayed-ignition stocks) and comparing side by
+side. One rendering quirk found only in that headless tool: a few emoji (💥 🔥 🎯) fall back to generic glyphs
+because its bundled font lacks full color-emoji coverage - this does not affect real browsers (Chrome/Firefox/Edge),
+which is what Streamlit serves to users.

@@ -19,6 +19,15 @@ MISTAKES = ["None", "Chased / late entry", "Moved or removed SL", "No stop-loss"
             "Held too long", "Traded against market mood", "Overtrading", "Revenge trade", "Ignored my plan"]
 
 
+SHORT_SETUP = {"Breakout Leader (EXPLOSIVE)": "Leader 💥", "Breakout Leader (STRONG)": "Leader 🔥", "Breakout Leader (SPURT)": "Leader ⚡",
+               "Trend Ignition": "Trend Ign.", "Gap trap reversal": "Gap Trap", "ORB scanner (strong buy)": "ORB Scan",
+               "VWAP pullback": "VWAP", "News / other": "Own"}
+SHORT_MISTAKE = {"None": "OK", "Chased / late entry": "Chased", "Moved or removed SL": "SL moved", "No stop-loss": "No SL",
+                 "Oversized": "Oversized", "Exited too early": "Early exit", "Held too long": "Held long",
+                 "Traded against market mood": "Vs mood", "Overtrading": "Overtrade", "Revenge trade": "Revenge",
+                 "Ignored my plan": "Off-plan"}
+
+
 def owner_hash(key: str) -> str:
     """The journal is filed under a hash of the access key; without the same key the rows are never queried."""
     return hashlib.sha256(("orb-journal|" + key.strip()).encode()).hexdigest()[:24]
@@ -46,6 +55,7 @@ def enrich(e: dict) -> dict:
         e["pnl"] = round(gross - float(e.get("charges") or 0), 2)
     risk = abs(entry - sl) * qty if sl > 0 else 0.0
     e["r"] = round(gross / risk, 2) if risk > 0 else None
+    e["pts"] = round((exit_ - entry) * s, 2)
     a, b = _minutes(e.get("entry_time")), _minutes(e.get("exit_time"))
     e["hold_min"] = (b - a) if a is not None and b is not None and b >= a else None
     return e
@@ -71,7 +81,13 @@ def stats(df: pd.DataFrame) -> dict:
     gp, gl = float(w.pnl.sum()), float(-l.pnl.sum())
     dd = float((df.equity - df.equity.cummax()).min())
     daily = df.groupby("date").pnl.sum()
-    return dict(trades=len(df), net=float(df.pnl.sum()), win_rate=float((df.pnl > 0).mean() * 100),
+    streak = best = 0
+    for v in df.pnl:                                              # best run of consecutive winning trades
+        streak = streak + 1 if v > 0 else 0
+        best = max(best, streak)
+    disc = float((df.mistake.fillna("None") == "None").mean() * 100)
+    return dict(trades=len(df), wins=int(len(w)), losses=int(len(l)), win_streak=best, discipline=disc,
+                net=float(df.pnl.sum()), win_rate=float((df.pnl > 0).mean() * 100),
                 avg_win=float(w.pnl.mean()) if len(w) else 0.0, avg_loss=float(l.pnl.mean()) if len(l) else 0.0,
                 profit_factor=(gp / gl) if gl > 0 else (float("inf") if gp > 0 else 0.0),
                 expectancy=float(df.pnl.mean()), avg_r=float(df.r.dropna().mean()) if df.r.notna().any() else None,
@@ -147,3 +163,41 @@ def csv_bytes(df: pd.DataFrame) -> bytes:
     out = df[cols].copy()
     out["date"] = out["date"].dt.strftime("%Y-%m-%d")
     return out.to_csv(index=False).encode("utf-8")
+
+
+def insight_cards(df: pd.DataFrame) -> dict:
+    """The three cards under the calendar: BEST SETUP, AVG HOLD, WATCH OUT (plain text, no markdown)."""
+    if df.empty:
+        return {}
+    out = {}
+    g = df.groupby("setup").agg(n=("pnl", "size"), net=("pnl", "sum"), win=("pnl", lambda x: (x > 0).mean() * 100)).sort_values("net", ascending=False)
+    b = g.iloc[0]
+    out["best"] = (f"{g.index[0]} - {b.win:.0f}% wins ({int(b.n)} trade{'s' if b.n != 1 else ''}), "
+                   f"{'+' if b.net >= 0 else '-'}₹{abs(b.net):,.0f} net. " + ("Lean on what works." if b.net > 0 else "Not paying yet - review it."))
+    h = df.hold_min.dropna()
+    if len(h):
+        txt = f"{h.mean():.0f} min"
+        et = df.entry_time.map(_minutes)
+        am, pm = df[(et < 720) & et.notna()], df[(et >= 720) & et.notna()]
+        if len(am) and len(pm):
+            a_wr, p_wr = (am.pnl > 0).mean() * 100, (pm.pnl > 0).mean() * 100
+            if a_wr >= p_wr + 15:
+                txt += " - your winners are morning trades; afternoon trades are mostly losses."
+            elif p_wr >= a_wr + 15:
+                txt += " - your afternoon trades win more than your morning ones."
+        w, l = df[(df.pnl > 0) & df.hold_min.notna()].hold_min, df[(df.pnl < 0) & df.hold_min.notna()].hold_min
+        if txt.endswith("min") and len(w) and len(l):
+            txt += f" - winners {w.mean():.0f} min, losers {l.mean():.0f} min" + (". You hold losers longer." if l.mean() > w.mean() * 1.3 else ".")
+        out["hold"] = txt
+    else:
+        out["hold"] = "Add entry and exit times to see how long you hold."
+    m = df[(df.mistake.fillna("None") != "None") & (df.pnl < 0)]
+    if len(m):
+        latest = m.date.max()
+        mm = m[(m.date.dt.year == latest.year) & (m.date.dt.month == latest.month)]
+        gm = mm.groupby("mistake").pnl.agg(["sum", "size"]).sort_values("sum")
+        out["watch"] = (f"{int(gm.iloc[0]['size'])} loss{'es' if gm.iloc[0]['size'] != 1 else ''} tagged \"{gm.index[0]}\" - cost "
+                        f"₹{-gm.iloc[0]['sum']:,.0f} in {latest.strftime('%b %Y')}. Stop that one habit.")
+    else:
+        out["watch"] = "No losing trade carries a mistake tag - tag your losses to see what your errors cost."
+    return out

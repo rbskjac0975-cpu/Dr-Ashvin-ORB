@@ -64,6 +64,11 @@ class Cfg:
     ld_max_age: int = 45             # layer 3: drop leaders detected longer ago than this (minutes)
     ld_late_ext: float = 1.0         # layer 3: drop if price is already this many ORB-widths past the breakout level
     ld_shorts: bool = True           # include breakdown (short / PE) leaders
+    ld_open_window: int = 15         # opening-surge detection: candles in the first N minutes (fires from 09:15, before the ORB forms)
+    ld_open_min_body: float = 0.2    # opening candle body as % of price
+    ld_open_spurt: float = 3.0       # opening-surge tiers: candle volume vs an average minute of the stock (x)
+    ld_open_strong: float = 5.0
+    ld_open_explosive: float = 12.0
     ld_strike_pref: str = "ATM"      # ATM | ITM-1 | OTM-1
     expiry_weekday: int = 1          # monthly stock-option expiry weekday (0=Mon ... 1=Tue). Verify with NSE.
     # trend ignition (open = low / open = high)
@@ -73,6 +78,7 @@ class Cfg:
     ig_body: float = 0.6             # min candle body / range
     ig_min_move: float = 0.25        # min candle body as % of price (a real impulse, not a drifting open)
     ig_max_risk_pct: float = 1.5     # skip if the ignition candle is wider than this % of price
+    ig_move_pct: float = 1.0         # delayed ignition: stock that opened at its low and has since gained this % from the open
 
 
 def save_cfg(cfg: Cfg) -> None:
