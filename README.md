@@ -9,6 +9,10 @@ pip install -r requirements.txt
 streamlit run app.py                                            # dashboard
 python monitor.py --scan "Nifty 200" --scan-every 180 --leaders  # backend (separate terminal)
 ```
+On first launch, set a dashboard password (minimum 8 characters). The salted password hash is stored in the app's SQLite database; use **Change password** in the sidebar later. Set `APP_PASSWORD` or `APP_PASSWORD_HASH` in the host environment/secrets to manage the credential outside the app instead. Keep HTTPS enabled when hosting.
+
+On an HTTPS host, open the dashboard in Chrome on Android and choose **⋮ → Add to Home screen**. The installed shortcut uses the standalone display mode and app icon. Mobile layouts stack the tier cards and gap panels and allow wide journal tables to scroll horizontally. Streamlit static serving is enabled in `.streamlit/config.toml` for the web app manifest and icon.
+
 Optional Telegram alerts: set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (or paste in the sidebar).
 Click **Save settings for backend monitor** in the sidebar so `monitor.py` uses the same settings.
 For real F&O data drop NSE's `fo_mktlots.csv` into `./cache/` (it is also downloaded automatically when NSE is reachable).
@@ -53,7 +57,7 @@ for the interactive parts (scan now, live auto-scan, speed, etc).
 - **Option premiums are estimates** (Black-Scholes on 20-day realised volatility as an IV stand-in). yfinance has no NSE option chain. Strike interval is an approximate price-band table and the monthly expiry weekday is a setting (default Tuesday) - **verify both with NSE / your broker**. Override strike steps and lot sizes per symbol in `cache/fno_lots.csv` (`symbol,lot,strike_step`).
 - **Lot sizes are never hard-coded** (they change). They come from NSE's `fo_mktlots.csv` or your CSV. If neither exists the built-in F&O list is approximate, lots are "unknown", and the journal asks you to type the lot size.
 - **Pre-open**: yfinance has no 09:00-09:08 indicative prices. The gap is the exchange's opening price at 09:15 (the auction result), frozen at the bell. An optional NSE pre-open fetch is included but **untested against live NSE** and often blocked.
-- **"Synced on phone and PC"**: the journal is stored in this app's SQLite file under a hash of your access key. Entries are private per key, but syncing across devices only works if both devices open the *same running server* (e.g. the app hosted on a VPS). There is no account system or password recovery.
+- **"Synced on phone and PC"**: the journal is stored in this app's SQLite file under a hash of your access key. Entries are private per key, but syncing across devices only works if both devices open the *same running server* (e.g. the app hosted on a VPS). The dashboard password is shared by all users of that hosted instance; there is no password recovery, so keep a backup of the SQLite database and host configuration.
 - Data is yfinance (unofficial, can lag or drop symbols). The first F&O scan downloads ~150-200 symbols of 1-minute data and takes a while; results are cached 20 s.
 - Ignition exits and replay results are simulated on 1-minute bars; real fills differ. Inside one bar the stop is assumed to hit before the target.
 - Paper-trade for a few weeks first. This is decision-support, not investment advice.

@@ -23,6 +23,31 @@ st.set_page_config(page_title="ORB Command Center", page_icon="📈", layout="wi
 auth.require_login()
 store.init()
 
+# Add-to-Home-Screen metadata is attached to Streamlit's parent document from this
+# same-origin component. It takes effect when served over HTTPS (or localhost).
+components.html("""<script>
+try {
+ const path=window.parent.location.pathname;
+ const d=window.parent.document, base=path.endsWith('/')?path.slice(0,-1):path;
+ const href=(base||'')+'/app/static/manifest.json';
+ if(!d.querySelector('link[rel="manifest"]')){const l=d.createElement('link');l.rel='manifest';l.href=href;d.head.appendChild(l);}
+ if(!d.querySelector('meta[name="theme-color"]')){const m=d.createElement('meta');m.name='theme-color';m.content='#101827';d.head.appendChild(m);}
+ if('serviceWorker' in window.parent.navigator) window.parent.navigator.serviceWorker.register((base||'')+'/app/static/sw.js').catch(()=>{});
+} catch(e) {}
+</script>""", height=0)
+st.markdown("""<style>
+@media(max-width:700px){
+ [data-testid="stAppViewContainer"]{padding-left:0!important;padding-right:0!important}
+ [data-testid="stMainBlockContainer"]{padding:0.7rem 0.65rem 2rem!important}
+ [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:.5rem!important}
+ [data-testid="stHorizontalBlock"]>[data-testid="column"]{min-width:min(100%, 150px)!important;flex:1 1 145px!important}
+ [data-testid="stMetricValue"]{font-size:1.15rem!important}
+ [data-testid="stTabs"] [role="tablist"]{gap:.2rem;overflow-x:auto;flex-wrap:nowrap;white-space:nowrap}
+ [data-testid="stTabs"] button[role="tab"]{font-size:.78rem;padding:.45rem .55rem}
+ [data-testid="stSidebar"]{min-width:0}
+}
+</style>""", unsafe_allow_html=True)
+
 
 # ----------------------------------------------------------------------------- cached loaders
 @st.cache_data(ttl=3600, show_spinner=False)

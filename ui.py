@@ -143,6 +143,22 @@ b{font-weight:700}
 .cal .d.today{border:2px solid #d4a017;line-height:20px}
 .cal th{font-size:9.5px;color:#94a3b8;font-weight:700;padding:2px}
 .pill{display:inline-block;padding:3px 12px;border:1px solid #d4a017;border-radius:14px;color:#b45309;font-weight:800;font-size:10px;letter-spacing:.4px;background:#fffbeb}
+@media(max-width:700px){
+ body{padding:3px 2px 8px;font-size:13px}
+ .cols,.cols tbody,.cols tr,.cols td{display:block;width:100%}
+ .cols{border-spacing:0;margin:0}
+ .cols .col{margin:0 0 10px 0}
+ .g2,.g2 tbody,.g2 tr,.g2 td{display:block;width:100%}
+ .g2{border-spacing:0}
+ .gb{display:block!important;height:auto;margin:0 0 8px}
+ .kp{border-spacing:4px 0}
+ .kp .k{padding:7px 4px}
+ .kp .k .v{font-size:16px;white-space:normal}
+ .chips{white-space:normal;text-align:right}
+ .clk{display:block;margin:3px 0 0;font-size:11px}
+ .card{padding:9px}
+ .tt{display:block;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
+}
 </style>"""
 
 CLOCK = ('<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="none" stroke="#475569" stroke-width="1.2"/>'
