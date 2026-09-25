@@ -18,35 +18,12 @@ import leaders as L
 import store
 import ui as U
 import auth
+import pwa
 
 st.set_page_config(page_title="ORB Command Center", page_icon="📈", layout="wide")
-auth.require_login()
+pwa.inject()
 store.init()
-
-# Add-to-Home-Screen metadata is attached to Streamlit's parent document from this
-# same-origin component. It takes effect when served over HTTPS (or localhost).
-components.html("""<script>
-try {
- const path=window.parent.location.pathname;
- const d=window.parent.document, base=path.endsWith('/')?path.slice(0,-1):path;
- const href=(base||'')+'/app/static/manifest.json';
- if(!d.querySelector('link[rel="manifest"]')){const l=d.createElement('link');l.rel='manifest';l.href=href;d.head.appendChild(l);}
- if(!d.querySelector('meta[name="theme-color"]')){const m=d.createElement('meta');m.name='theme-color';m.content='#101827';d.head.appendChild(m);}
- if('serviceWorker' in window.parent.navigator) window.parent.navigator.serviceWorker.register((base||'')+'/app/static/sw.js').catch(()=>{});
-} catch(e) {}
-</script>""", height=0)
-st.markdown("""<style>
-@media(max-width:700px){
- [data-testid="stAppViewContainer"]{padding-left:0!important;padding-right:0!important}
- [data-testid="stMainBlockContainer"]{padding:0.7rem 0.65rem 2rem!important}
- [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:.5rem!important}
- [data-testid="stHorizontalBlock"]>[data-testid="column"]{min-width:min(100%, 150px)!important;flex:1 1 145px!important}
- [data-testid="stMetricValue"]{font-size:1.15rem!important}
- [data-testid="stTabs"] [role="tablist"]{gap:.2rem;overflow-x:auto;flex-wrap:nowrap;white-space:nowrap}
- [data-testid="stTabs"] button[role="tab"]{font-size:.78rem;padding:.45rem .55rem}
- [data-testid="stSidebar"]{min-width:0}
-}
-</style>""", unsafe_allow_html=True)
+auth.require_login()
 
 
 # ----------------------------------------------------------------------------- cached loaders
@@ -126,7 +103,7 @@ def pick(options, val, fallback=0):
 saved = E.load_cfg()
 with st.sidebar:
     st.title("ORB Command Center")
-    auth.logout_button()
+    auth.sidebar_controls()
     universe = st.selectbox("Universe", list(E.NSE_LISTS), index=2)
     with st.expander("Risk", expanded=True):
         capital = st.number_input("Capital (₹)", 10000.0, 1e9, float(saved.capital), 10000.0)
@@ -572,7 +549,7 @@ def _n(x, default=None):
 def mood_strip(b):
     """Advance/decline breadth in one look."""
     html_, h = U.breadth_html(b)
-    components.html(html_, height=h, scrolling=False)
+    components.html(html_, height=h, scrolling=True)
 
 
 # ----------------------------------------------------------------------------- 1-3. breakout leaders
@@ -634,7 +611,7 @@ with tab_ld:
         counts = {t: int((board.tier == t).sum()) for t in ("SPURT", "STRONG", "EXPLOSIVE")} if not board.empty else {t: 0 for t in ("SPURT", "STRONG", "EXPLOSIVE")}
         tb_html, tb_h = U.leaders_toolbar_html(stt, b, int(ld_every), ld_auto, st.session_state["ld_time"].strftime("%H:%M:%S"),
                                                counts, cfg.ld_spurt_vol, cfg.confirm_bars * 4 + 3)
-        components.html(tb_html, height=tb_h, scrolling=False)
+        components.html(tb_html, height=tb_h, scrolling=True)
         if board.empty:
             st.warning("No leaders right now. Either nothing has broken out cleanly, or the market is closed / data is missing.")
             return
@@ -727,7 +704,7 @@ with tab_gap:
                 st.caption(f"Frozen snapshot saved {snap['saved'][:16].replace('T', ' ')} IST for session {asof}.")
             po = st.session_state.get("gaps_preopen") or {}
             gp_html, gp_h = U.gaps_html(gt, gap_min, E.now_ist().strftime("%H:%M"), asof, has_bs=bool(po))
-            components.html(gp_html, height=gp_h, scrolling=False)
+            components.html(gp_html, height=gp_h, scrolling=True)
             with st.expander("Full table"):
                 sel = gt[gt.gap_pct.abs() >= gap_min]
                 cc = ["symbol", "gap_pct", "prev_close", "open", "ltp", "live_pct", "from_open_pct", "trap", "trap_state", "reason"]

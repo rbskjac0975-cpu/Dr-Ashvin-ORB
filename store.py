@@ -96,6 +96,10 @@ def get_meta(k: str, default=None):
     return json.loads(rows[0]["v"]) if rows else default
 
 
+def delete_meta(k: str) -> None:
+    _run("DELETE FROM meta WHERE k=?", (k,))
+
+
 def heartbeat() -> None:
     set_meta("monitor_hb", time.time())
 

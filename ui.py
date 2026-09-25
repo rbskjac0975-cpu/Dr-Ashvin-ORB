@@ -41,7 +41,7 @@ def _cls(x: Optional[float]) -> str:
     return "up" if (x or 0) >= 0 else "dn"
 
 
-CSS = """<meta charset="utf-8"><style>
+CSS = """<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><style>
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{padding:4px 2px 8px 2px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;background:#ffffff;font-size:12px}
@@ -49,8 +49,9 @@ table{border-collapse:separate;border-spacing:0}
 .w{width:100%}
 .up{color:#15803d}.dn{color:#b91c1c}.mut{color:#6b7280}
 b{font-weight:700}
-.cols{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:10px 0;margin:0 -5px}
-.col{vertical-align:top;border:1px solid #e5e7eb;border-radius:12px;background:#ffffff}
+.cols{display:flex;gap:10px;align-items:flex-start;width:100%}
+.col{flex:1 1 0;min-width:0;vertical-align:top;border:1px solid #e5e7eb;border-radius:12px;background:#ffffff}
+.icol{flex:1 1 0;min-width:0}
 .hd{padding:9px 12px;border-radius:12px 12px 0 0;color:#fff;font-weight:800;font-size:13px;letter-spacing:.3px}
 .hd .cnt{display:inline-block;min-width:26px;text-align:center;padding:1px 9px;border-radius:12px;background:rgba(255,255,255,.88);font-size:11px}
 .sub{padding:6px 12px;font-size:10px;font-weight:700;letter-spacing:.2px}
@@ -90,7 +91,7 @@ b{font-weight:700}
 .gph{padding:8px 14px;background:#dc2626;background:-webkit-linear-gradient(left,#b91c1c,#ef4444);background:linear-gradient(90deg,#b91c1c,#ef4444);color:#fff;font-weight:800;letter-spacing:.5px;font-size:12px}
 .gph .hide{display:inline-block;background:#fff;color:#b91c1c;border-radius:10px;padding:0 9px;font-size:10px;cursor:pointer;font-weight:700}
 .gps{padding:5px 14px;font-size:9.5px;color:#b91c1c;font-weight:600;border-bottom:1px solid #fecaca}
-.g2{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:10px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .gb{vertical-align:top;border-radius:10px;padding:8px 10px;border:1px solid #e5e7eb;height:170px}
 .gb.gu{background:#f0fdf4;border-color:#bbf7d0}.gb.gd{background:#fef2f2;border-color:#fecaca}.gb.gt{background:#fff7ed;border-color:#fed7aa}
 .gt2{font-weight:800;font-size:11px;letter-spacing:.4px;padding-bottom:6px}
@@ -104,7 +105,7 @@ b{font-weight:700}
 .ar2{font-size:9px;margin-right:3px}
 /* replay */
 .rh{padding:8px 4px 6px 4px;font-size:10.5px;font-weight:800;letter-spacing:.5px;color:#64748b}
-.rc{background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin:0 0 8px 0;padding:7px 10px}
+.rc{display:flex;align-items:flex-start;gap:8px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin:0 0 8px 0;padding:7px 10px}
 .rc.fresh{border-color:#5eead4;background:#f0fdfa}
 .rsym{font-weight:800;font-size:12.5px;color:#0f172a}
 .rt{font-family:Consolas,Menlo,monospace;font-size:10.5px;color:#64748b;font-weight:700;text-align:right;white-space:nowrap}
@@ -116,15 +117,18 @@ b{font-weight:700}
 .rp.up{background:#dcfce7;color:#15803d}.rp.dn{background:#fee2e2;color:#b91c1c}
 .rw{margin-top:5px;font-size:10px;font-weight:800;color:#b45309}
 /* journal */
-.kp{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:8px 0;margin:0 -4px}
-.k{border:1px solid #e5e7eb;border-radius:10px;padding:9px 11px;background:#fff;vertical-align:top}
+.kp{display:flex;gap:8px;width:100%}
+.k{flex:1 1 0;min-width:0;border:1px solid #e5e7eb;border-radius:10px;padding:9px 11px;background:#fff;vertical-align:top}
 .k .l{font-size:9.5px;font-weight:800;color:#64748b;letter-spacing:.5px}
 .k .v{font-size:20px;font-weight:800;margin-top:2px;white-space:nowrap}
 .k .s{font-size:9.5px;color:#94a3b8;margin-top:1px}
-.pn{border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;background:#fff;vertical-align:top}
+.mid2{display:flex;gap:10px;align-items:stretch;margin-top:10px}
+.pn{flex:1 1 0;min-width:0;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;background:#fff;vertical-align:top}
+.pn.side{flex:0 0 34%}
 .pn .t{font-weight:800;font-size:12px}
 .pn .t small{font-weight:500;color:#94a3b8;font-size:10px;margin-left:6px}
-.ins{border:1px solid #e5e7eb;border-radius:8px;padding:9px 12px;background:#fffdf8;vertical-align:top;font-size:11.5px;color:#334155}
+.insrow{display:flex;gap:8px;margin:10px 0 0 0}
+.ins{flex:1 1 0;min-width:0;border:1px solid #e5e7eb;border-radius:8px;padding:9px 12px;background:#fffdf8;vertical-align:top;font-size:11.5px;color:#334155}
 .ins .l{font-size:9.5px;font-weight:800;letter-spacing:.6px;margin-bottom:3px}
 .tt{width:100%;border-collapse:collapse;margin-top:10px}
 .tt th{font-size:10px;color:#64748b;font-weight:800;text-align:left;padding:7px 8px;border-bottom:1px solid #e5e7eb;background:#fafafa}
@@ -143,21 +147,21 @@ b{font-weight:700}
 .cal .d.today{border:2px solid #d4a017;line-height:20px}
 .cal th{font-size:9.5px;color:#94a3b8;font-weight:700;padding:2px}
 .pill{display:inline-block;padding:3px 12px;border:1px solid #d4a017;border-radius:14px;color:#b45309;font-weight:800;font-size:10px;letter-spacing:.4px;background:#fffbeb}
-@media(max-width:700px){
- body{padding:3px 2px 8px;font-size:13px}
- .cols,.cols tbody,.cols tr,.cols td{display:block;width:100%}
- .cols{border-spacing:0;margin:0}
- .cols .col{margin:0 0 10px 0}
- .g2,.g2 tbody,.g2 tr,.g2 td{display:block;width:100%}
- .g2{border-spacing:0}
- .gb{display:block!important;height:auto;margin:0 0 8px}
- .kp{border-spacing:4px 0}
- .kp .k{padding:7px 4px}
- .kp .k .v{font-size:16px;white-space:normal}
- .chips{white-space:normal;text-align:right}
- .clk{display:block;margin:3px 0 0;font-size:11px}
- .card{padding:9px}
- .tt{display:block;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
+@media (max-width: 720px) {
+  body{font-size:12.5px}
+  .cols{flex-direction:column}
+  .col{width:100%}
+  .icol{width:100%}
+  .g2{grid-template-columns:1fr}
+  .gb{height:auto;max-height:220px}
+  .kp{flex-wrap:wrap}
+  .k{flex:1 1 40%}
+  .mid2{flex-direction:column}
+  .pn.side{flex:1 1 auto}
+  .insrow{flex-direction:column}
+  .tt{font-size:10.5px}
+  .tt th, .tt td{padding:6px 5px;white-space:normal}
+  .rc{flex-wrap:wrap}
 }
 </style>"""
 
@@ -193,11 +197,11 @@ def breadth_html(b: Optional[dict]) -> Tuple[str, int]:
     green_pct = (adv + unch * 0.5) / tot * 100
     kp = [("ADVANCES", f"{adv}", "#16a34a", "▲"), ("UNCHANGED", f"{unch}", "#0f172a", "·"), ("DECLINES", f"{dec}", "#dc2626", "▼"),
           ("A / D RATIO", f"{ratio:.2f}" if dec else "∞", "#1d4ed8", "")]
-    kpis = "".join(f"<td class='k' style='text-align:center'><div class='l'>{a}</div><div class='v' style='color:{c}'>{d} {b_}</div></td>"
+    kpis = "".join(f"<div class='k' style='text-align:center'><div class='l'>{a}</div><div class='v' style='color:{c}'>{d} {b_}</div></div>"
                    for a, b_, c, d in kp)
     body = (f"<table class='w'><tr><td><span style='font-size:14px;font-weight:800'>📶 Market Breadth — Advance / Decline</span></td>"
             f"<td style='text-align:right'><span class='pill' style='border-color:{vcol};color:{vcol};background:{vbg}'>🚀 {verdict.upper()} breadth</span></td></tr></table>"
-            f"<table class='kp' style='margin-top:8px'><tr>{kpis}</tr></table>"
+            f"<div class='kp' style='margin-top:8px'>{kpis}</div>"
             f"<div style='height:9px;border-radius:4px;overflow:hidden;background:#fee2e2;margin-top:10px'>"
             f"<div style='height:9px;background:#16a34a;width:{green_pct:.1f}%;display:inline-block'></div></div>"
             f"<div style='font-size:10px;color:#94a3b8;margin-top:5px'>{tot} stocks me <b class='up'>{adv} upar</b> · "
@@ -277,10 +281,10 @@ def leaders_board_html(board: pd.DataFrame, per_tier: int = 8) -> Tuple[str, int
         cards = "".join(leader_card_html(r, t) for r in sub.head(per_tier).to_dict("records")) if len(sub) else "<div class='empty'>none right now</div>"
         more = f"<div class='empty'>+{len(sub) - per_tier} more - raise 'Cards per tier'</div>" if len(sub) > per_tier else ""
         mx = max(mx, min(len(sub), per_tier))
-        cols.append(f"<td class='col'><div class='hd' style='{_grad(t['hd'], t['hd2'])}'><table class='w'><tr><td>{t['icon']} {tier}</td>"
+        cols.append(f"<div class='col'><div class='hd' style='{_grad(t['hd'], t['hd2'])}'><table class='w'><tr><td>{t['icon']} {tier}</td>"
                     f"<td style='text-align:right'><span class='cnt' style='color:{t['hd']}'>{len(sub)}</span></td></tr></table></div>"
-                    f"<div class='sub' style='background:{t['sub_bg']};color:{t['sub_fg']}'>{t['sub']}</div><div class='body'>{cards}{more}</div></td>")
-    return _wrap(f"<table class='cols'><tr>{''.join(cols)}</tr></table>"), min(140 + mx * 270, 2400)
+                    f"<div class='sub' style='background:{t['sub_bg']};color:{t['sub_fg']}'>{t['sub']}</div><div class='body'>{cards}{more}</div></div>")
+    return _wrap(f"<div class='cols'>{''.join(cols)}</div>"), min(140 + mx * 270, 2400)
 
 
 # =========================================================================== 4. trend ignition
@@ -310,8 +314,8 @@ def ignition_html(df: pd.DataFrame) -> Tuple[str, int]:
             f"<div class='hd' style='{_grad(IGN['hd'], IGN['hd2'])}'><table class='w'><tr><td>⚡ {IGN['title']}</td>"
             f"<td style='text-align:right'><span class='cnt' style='color:{IGN['hd']}'>{len(rows)}</span></td></tr></table></div>"
             f"<div class='sub' style='background:{IGN['sub_bg']};color:{IGN['sub_fg']}'>OPENED AT THE DAY'S LOW (OR HIGH) AND NEVER LOOKED BACK · newest first · fresh detections from 09:15</div>"
-            f"<table class='cols' style='margin:6px 0 0 0'><tr><td style='vertical-align:top;padding:0 4px 0 8px'>{left}</td>"
-            f"<td style='vertical-align:top;padding:0 8px 0 4px'>{right}</td></tr></table></div>")
+            f"<div class='cols' style='padding:8px'><div class='icol'>{left}</div>"
+            f"<div class='icol'>{right}</div></div></div>")
     return _wrap(body), min(150 + ((len(rows) + 1) // 2) * 135, 2400)
 
 
@@ -334,15 +338,15 @@ def gaps_html(gt: pd.DataFrame, gap_min: float, updated: str, session: str, has_
 
     def box(cls, title, d, trap):
         rows = "".join(_grow(r, trap, has_bs) for r in d.head(12).to_dict("records")) or "<tr><td class='mut' style='padding:8px 0'>none</td></tr>"
-        return f"<td class='gb {cls}'><div class='gt2'>{title}<span class='n'>{len(d)}</span></div><div class='gl'><table class='w'>{rows}</table></div></td>"
+        return f"<div class='gb {cls}'><div class='gt2'>{title}<span class='n'>{len(d)}</span></div><div class='gl'><table class='w'>{rows}</table></div></div>"
 
     bs_note = " · B/S chip = share of buy orders in the pre-open book" if has_bs else ""
     body = (f"<div class='gp'><div class='gph'><table class='w'><tr><td>PRE-OPEN GAPS</td><td style='text-align:right'>"
-            f"<span class='hide' onclick=\"var b=document.getElementById('gb');var h=b.style.display=='none';b.style.display=h?'block':'none';this.innerHTML=h?'- hide':'+ show'\">- hide</span></td></tr></table></div>"
+            f"<span class='hide' onclick=\"var b=document.getElementById('gb');var h=b.style.display=='none';b.style.display=h?'grid':'none';this.innerHTML=h?'- hide':'+ show'\">- hide</span></td></tr></table></div>"
             f"<div class='gps'>gap = opening price (exchange auction result) vs previous close · frozen at the 09:15 bell{bs_note} · session {esc(session)} · "
             f"updated {esc(updated)} IST · information only, not a recommendation</div>"
-            f"<div id='gb'><table class='g2'><tr>{box('gu', '▲ GAP UP', up, False)}{box('gt', '◻ LONG-TRAP', lt, True)}</tr>"
-            f"<tr>{box('gd', '▼ GAP DOWN', dn, False)}{box('gt', '◻ SHORT-TRAP', st_, True)}</tr></table></div></div>")
+            f"<div id='gb' class='g2'>{box('gu', '▲ GAP UP', up, False)}{box('gt', '◻ LONG-TRAP', lt, True)}"
+            f"{box('gd', '▼ GAP DOWN', dn, False)}{box('gt', '◻ SHORT-TRAP', st_, True)}</div></div>")
     return _wrap(body), 470
 
 
@@ -367,13 +371,13 @@ def replay_card_html(c: dict, step: int) -> str:
     pct = f"<span class='rp {_cls(dc)}'>{_pct(dc)}</span>" if dc is not None else ""
     fresh = " fresh" if c.get("fresh") else ""
     up = f" · up {L.hhmm(c['cur_m'])}" if c.get("upgraded") else ""
-    return (f"<table class='rc w{fresh}' style='border-collapse:separate'><tr>"
-            f"<td style='vertical-align:top'><div class='rsym'>{esc(c['symbol'])}</div>"
+    return (f"<div class='rc{fresh}'>"
+            f"<div style='flex:1 1 0;min-width:0'><div class='rsym'>{esc(c['symbol'])}</div>"
             f"<div style='margin-top:4px'><span class='rv'>{c['vol']:.2f}x</span><span class='rcb {esc(c['chip'])}'>◎ {esc(c['chip'])}</span>{pct}</div>"
-            f"<div class='rw'>{'★' * c['stars']} {esc(c['watch'])}</div></td>"
-            f"<td style='vertical-align:middle;text-align:center;width:130px'>{sparkline(c['series'], step)}</td>"
-            f"<td style='vertical-align:top;width:58px'><div class='rt'>{L.hhmm(c['first_m'])} <span class='ar {'up' if long else 'dn'}' style='font-size:11px'>{'▲' if long else '▼'}</span></div>"
-            f"<div class='rt' style='font-size:9px;font-weight:600'>{up.strip(' ·')}</div></td></tr></table>")
+            f"<div class='rw'>{'★' * c['stars']} {esc(c['watch'])}</div></div>"
+            f"<div style='flex:0 0 110px;text-align:center'>{sparkline(c['series'], step)}</div>"
+            f"<div style='flex:0 0 56px'><div class='rt'>{L.hhmm(c['first_m'])} <span class='ar {'up' if long else 'dn'}' style='font-size:11px'>{'▲' if long else '▼'}</span></div>"
+            f"<div class='rt' style='font-size:9px;font-weight:600'>{up.strip(' ·')}</div></div></div>")
 
 
 def replay_html(cards: List[dict], per_col: int = 8, step: int = 1) -> Tuple[str, int]:
@@ -385,8 +389,8 @@ def replay_html(cards: List[dict], per_col: int = 8, step: int = 1) -> Tuple[str
         mx = max(mx, min(len(sub), per_col))
         inner = "".join(replay_card_html(c, step) for c in sub[:per_col]) or "<div class='empty'>nothing yet</div>"
         more = f"<div class='empty'>+{len(sub) - per_col} more</div>" if len(sub) > per_col else ""
-        cols.append(f"<td class='col' style='border:none'><div class='rh'>{t['icon']} {tier} — AS THEY APPEARED</div>{inner}{more}</td>")
-    return _wrap(f"<table class='cols'><tr>{''.join(cols)}</tr></table>"), min(90 + mx * 100, 1800)
+        cols.append(f"<div class='col' style='border:none'><div class='rh'>{t['icon']} {tier} — AS THEY APPEARED</div>{inner}{more}</div>")
+    return _wrap(f"<div class='cols'>{''.join(cols)}</div>"), min(90 + mx * 100, 1800)
 
 
 # =========================================================================== 6. journal dashboard
@@ -456,15 +460,15 @@ def journal_html(full: pd.DataFrame, rows: pd.DataFrame, S: dict, cards: dict, y
           ("AVG LOSS", _money(S["avg_loss"]), "#b91c1c", "per losing trade"),
           ("WIN STREAK", str(S["win_streak"]), "#0f172a", "best run"),
           ("DISCIPLINE", f"{S['discipline']:.0f}%", "#0f766e", "rules followed")]
-    kpis = "<table class='kp'><tr>" + "".join(f"<td class='k'><div class='l'>{a}</div><div class='v' style='color:{c}'>{b}</div><div class='s'>{s}</div></td>" for a, b, c, s in kp) + "</tr></table>"
-    mid = (f"<table class='w' style='border-collapse:separate;border-spacing:0 0;margin-top:10px'><tr>"
-           f"<td class='pn' style='width:64%'><div class='t'>Equity Curve<small>{span} · net {_money(S['net'])}</small></div>{_equity_svg(full)}"
-           f"<div style='font-size:9.5px;color:#94a3b8'>cumulative P&amp;L per trading day — the line your discipline draws</div></td>"
-           f"<td style='width:2%'></td><td class='pn' style='width:34%'>{_calendar(full, year, month, today)}</td></tr></table>")
-    ins = ("<table class='w' style='border-collapse:separate;border-spacing:8px 0;margin:10px -4px 0 -4px;table-layout:fixed'><tr>"
-           f"<td class='ins' style='border-left:4px solid #ea580c'><div class='l' style='color:#ea580c'>BEST SETUP</div>{esc(cards.get('best', ''))}</td>"
-           f"<td class='ins' style='border-left:4px solid #16a34a'><div class='l' style='color:#16a34a'>AVG HOLD</div>{esc(cards.get('hold', ''))}</td>"
-           f"<td class='ins' style='border-left:4px solid #dc2626'><div class='l' style='color:#dc2626'>WATCH OUT</div>{esc(cards.get('watch', ''))}</td></tr></table>")
+    kpis = "<div class='kp'>" + "".join(f"<div class='k'><div class='l'>{a}</div><div class='v' style='color:{c}'>{b}</div><div class='s'>{s}</div></div>" for a, b, c, s in kp) + "</div>"
+    mid = (f"<div class='mid2'>"
+           f"<div class='pn'><div class='t'>Equity Curve<small>{span} · net {_money(S['net'])}</small></div>{_equity_svg(full)}"
+           f"<div style='font-size:9.5px;color:#94a3b8'>cumulative P&amp;L per trading day — the line your discipline draws</div></div>"
+           f"<div class='pn side'>{_calendar(full, year, month, today)}</div></div>")
+    ins = ("<div class='insrow'>"
+           f"<div class='ins' style='border-left:4px solid #ea580c'><div class='l' style='color:#ea580c'>BEST SETUP</div>{esc(cards.get('best', ''))}</div>"
+           f"<div class='ins' style='border-left:4px solid #16a34a'><div class='l' style='color:#16a34a'>AVG HOLD</div>{esc(cards.get('hold', ''))}</div>"
+           f"<div class='ins' style='border-left:4px solid #dc2626'><div class='l' style='color:#dc2626'>WATCH OUT</div>{esc(cards.get('watch', ''))}</div></div>")
     trs = ""
     for i, r in enumerate(rows.sort_values(["date", "entry_time"], ascending=False).head(limit).to_dict("records")):
         long = r["side"] == "LONG"
@@ -483,8 +487,8 @@ def journal_html(full: pd.DataFrame, rows: pd.DataFrame, S: dict, cards: dict, y
                 f"<td class='{_cls(r['r'] or 0)}' style='font-weight:700'>{('%+.1fR' % r['r']) if r.get('r') is not None else '-'}</td>"
                 f"<td>{_setup_chip(r['setup'])}</td><td><span class='dc {'ok' if d_ok else 'bad'}'>{esc(J.SHORT_MISTAKE.get(mis, mis))}</span></td></tr>"
                 f"<tr class='note' id='n{i}'><td colspan='10'>📝 {note}</td></tr>")
-    table = (f"<table class='tt'><tr><th>Date</th><th>Symbol</th><th>Side</th><th>E / SL / T1 / Exit</th><th>Qty</th><th>Pts</th>"
-             f"<th>P&amp;L ₹</th><th>R</th><th>Setup</th><th>Disc.</th></tr>{trs}</table>"
+    table = (f"<div style='overflow-x:auto;-webkit-overflow-scrolling:touch'><table class='tt'><tr><th>Date</th><th>Symbol</th><th>Side</th><th>E / SL / T1 / Exit</th><th>Qty</th><th>Pts</th>"
+             f"<th>P&amp;L ₹</th><th>R</th><th>Setup</th><th>Disc.</th></tr>{trs}</table></div>"
              f"<div style='font-size:9.5px;color:#94a3b8;margin-top:4px'>{len(rows)} trades · click any row for its note &amp; lesson</div>")
     head = (f"<table class='w'><tr><td><span style='font-size:18px;font-weight:800'>Trading Journal</span> "
             f"<span class='pill' style='margin-left:8px'>PRIVATE — ONLY YOUR KEY</span></td></tr></table><div style='height:8px'></div>")
