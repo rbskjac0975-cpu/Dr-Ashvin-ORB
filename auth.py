@@ -1,72 +1,42 @@
 """
-auth.py - a simple password gate for the whole dashboard (separate from the Journal's per-access-key privacy,
-which protects individual journals from each other, not the app itself).
+auth.py - password gate for the whole dashboard, with in-app set/change/remove, on top of an optional
+host-level override for whoever is deploying/running the app.
 
-Set ONE of these before running `streamlit run app.py`:
-  * environment variable APP_PASSWORD_HASH = the sha256 hex digest of your password (recommended - see below)
-  * environment variable APP_PASSWORD = the password itself, in plain text (simpler, less safe on shared machines)
-  * st.secrets["APP_PASSWORD_HASH"] or st.secrets["APP_PASSWORD"] in .streamlit/secrets.toml, same rules
+Priority, checked in this order:
+  1. Host override: APP_PASSWORD_HASH or APP_PASSWORD, as an environment variable or the same keys in
+     .streamlit/secrets.toml. This wins over anything set from inside the app, and reports itself via
+     host_locked() so the sidebar hides the change-password controls and set_password()/change_password()
+     refuse to run - there's no in-app facility to change an environment variable on the host.
+  2. In-app password: set from the sidebar, stored as a salted hash in this app's own SQLite (store.py),
+     under its own meta key - unrelated to the Journal's per-access-key privacy in journal.py, which keeps
+     journals apart from each other and works regardless of whether this gate is on.
+  3. Nothing configured: the app runs open (fine for your own machine), and the first screen offers to set a
+     password now or skip and stay open. Skipping only affects the current session; the same choice is offered
+     again next time unless a password gets set.
 
-To get a hash without typing your password in plain text anywhere:
-    python -c "import auth; print(auth.hash_password(input('Password: ')))"
-
-If neither is set, the app runs open (unprotected) and shows a small warning in the sidebar - this is meant for
-local/private use only. Do not expose an unprotected instance on the open internet.
-
-This is basic protection (keeps casual/unauthenticated access out), not enterprise auth: one shared password, no
-per-user accounts, no password reset flow. A wrong-password lockout slows down guessing but the password itself
-lives in an environment variable or secrets.toml on the host, so anyone with access to the host can read it there.
+This is basic protection against casual/drive-by access, not enterprise auth: one shared password, no per-user
+accounts, no password-reset flow. Anyone with shell access to the host can still read an env-var override, or the
+stored hash in trades.db (a hash, not the password itself).
 """
 from __future__ import annotations
 
 import hashlib
-import hmac
 import os
-import sqlite3
 import time
 from typing import Optional
 
 import streamlit as st
 
+import store
+
+_SALT = "orb-command-center::"          # fixed pepper - keeps a leaked hash from being a bare, rainbow-table-able sha256
+_META_KEY = "auth_pw_hash"
 MAX_ATTEMPTS = 5
 LOCKOUT_SECONDS = 30
-DB = os.environ.get("TRADE_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "trades.db"))
-_ITERATIONS = 310_000
 
 
 def hash_password(pw: str) -> str:
-    """Return a salted, deliberately slow password hash."""
-    salt = os.urandom(16)
-    digest = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt, _ITERATIONS)
-    return f"pbkdf2_sha256${_ITERATIONS}${salt.hex()}${digest.hex()}"
-
-
-def _verify(pw: str, saved: str) -> bool:
-    if saved.startswith("pbkdf2_sha256$"):
-        try:
-            _, rounds, salt, expected = saved.split("$")
-            got = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), bytes.fromhex(salt), int(rounds)).hex()
-            return hmac.compare_digest(got, expected)
-        except (ValueError, TypeError):
-            return False
-    # Compatibility with the documented legacy SHA-256 hash setting.
-    return hmac.compare_digest(hashlib.sha256(pw.encode("utf-8")).hexdigest(), saved)
-
-
-def _stored_hash() -> Optional[str]:
-    try:
-        with sqlite3.connect(DB, timeout=5) as c:
-            row = c.execute("SELECT v FROM meta WHERE k='app_password_hash'").fetchone()
-            return row[0] if row else None
-    except sqlite3.Error:
-        return None
-
-
-def _save_hash(value: str) -> None:
-    with sqlite3.connect(DB, timeout=5) as c:
-        c.execute("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)")
-        c.execute("INSERT INTO meta(k,v) VALUES('app_password_hash',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (value,))
-        c.commit()
+    return hashlib.sha256((_SALT + pw).encode("utf-8")).hexdigest()
 
 
 def _secret(key: str) -> Optional[str]:
@@ -77,95 +47,182 @@ def _secret(key: str) -> Optional[str]:
         return None
 
 
-def _configured_hash() -> Optional[str]:
+def host_hash() -> Optional[str]:
+    """The hash implied by an env var / secrets override, or None if the host hasn't set one."""
     h = os.environ.get("APP_PASSWORD_HASH") or _secret("APP_PASSWORD_HASH")
     if h:
         return h.strip().lower()
     pw = os.environ.get("APP_PASSWORD") or _secret("APP_PASSWORD")
-    return hashlib.sha256(pw.encode("utf-8")).hexdigest() if pw else _stored_hash()
+    return hash_password(pw) if pw else None
+
+
+def host_locked() -> bool:
+    return host_hash() is not None
+
+
+def stored_hash() -> Optional[str]:
+    return store.get_meta(_META_KEY)
+
+
+def configured_hash() -> Optional[str]:
+    return host_hash() or stored_hash()
+
+
+def is_set() -> bool:
+    return configured_hash() is not None
+
+
+def set_password(pw: str) -> None:
+    if host_locked():
+        raise RuntimeError("Password is set by the host (APP_PASSWORD / APP_PASSWORD_HASH) and can't be changed from inside the app.")
+    store.set_meta(_META_KEY, hash_password(pw))
+
+
+def change_password(old_pw: str, new_pw: str) -> bool:
+    if host_locked():
+        raise RuntimeError("Password is set by the host (APP_PASSWORD / APP_PASSWORD_HASH) and can't be changed from inside the app.")
+    if hash_password(old_pw) != configured_hash():
+        return False
+    store.set_meta(_META_KEY, hash_password(new_pw))
+    return True
+
+
+def remove_password() -> None:
+    """Clears the in-app password. A host override, if any, still applies regardless."""
+    store.delete_meta(_META_KEY)
 
 
 def logged_in() -> bool:
     return bool(st.session_state.get("_authed"))
 
 
-def require_login() -> None:
-    """Call once, immediately after st.set_page_config, before anything else renders. Halts the script with
-    st.stop() until the correct password is entered; does nothing if no password is configured."""
-    real_hash = _configured_hash()
-    if real_hash is None:
-        st.markdown("<div style='max-width:420px;margin:12vh auto 0;text-align:center'><div style='font-size:34px'>🔒</div><h3>Set a dashboard password</h3><p>Choose a password to protect this app. It is saved as a salted hash in the app database.</p></div>", unsafe_allow_html=True)
-        _, mid, _ = st.columns([1, 1.3, 1])
-        with mid:
-            with st.form("orb_first_password", clear_on_submit=True):
-                pw = st.text_input("New password", type="password")
-                confirm = st.text_input("Confirm password", type="password")
-                ok = st.form_submit_button("Set password", type="primary", use_container_width=True)
-            if ok:
-                if len(pw) < 8:
-                    st.error("Use at least 8 characters.")
-                elif pw != confirm:
-                    st.error("Passwords do not match.")
-                else:
-                    _save_hash(hash_password(pw))
-                    st.session_state._authed = True
-                    st.rerun()
-        st.stop()
-    if logged_in():
-        return
+# --------------------------------------------------------------------------- screens
+def _lockout_remaining() -> float:
+    return st.session_state.get("_pw_locked_until", 0.0) - time.time()
 
-    locked_until = st.session_state.get("_pw_locked_until", 0.0)
-    remaining = locked_until - time.time()
-    st.markdown("<div style='max-width:360px;margin:12vh auto 0 auto;text-align:center'>"
+
+def _register_attempt(ok: bool) -> None:
+    if ok:
+        st.session_state._pw_attempts = 0
+        return
+    n = st.session_state.get("_pw_attempts", 0) + 1
+    st.session_state._pw_attempts = n
+    if n >= MAX_ATTEMPTS:
+        st.session_state._pw_locked_until = time.time() + LOCKOUT_SECONDS
+        st.session_state._pw_attempts = 0
+
+
+def _shell(body) -> None:
+    st.markdown("<div style='max-width:360px;margin:10vh auto 0 auto;text-align:center'>"
                "<div style='font-size:34px'>🔒</div><h3 style='margin:6px 0 18px 0'>ORB Command Center</h3></div>",
                unsafe_allow_html=True)
     _, mid, _ = st.columns([1, 1.3, 1])
     with mid:
+        body()
+    st.stop()
+
+
+def _login_screen() -> None:
+    def body():
+        remaining = _lockout_remaining()
         if remaining > 0:
             st.error(f"Too many wrong attempts. Try again in {int(remaining) + 1}s.")
-            st.stop()
+            return
         with st.form("orb_login", clear_on_submit=True):
             pw = st.text_input("Password", type="password", label_visibility="collapsed", placeholder="Password")
             ok = st.form_submit_button("Unlock", type="primary", use_container_width=True)
         if ok:
-            if _verify(pw, real_hash):
+            correct = hash_password(pw) == configured_hash()
+            _register_attempt(correct)
+            if correct:
                 st.session_state._authed = True
-                st.session_state._pw_attempts = 0
                 st.rerun()
             else:
-                n = st.session_state.get("_pw_attempts", 0) + 1
-                st.session_state._pw_attempts = n
-                if n >= MAX_ATTEMPTS:
-                    st.session_state._pw_locked_until = time.time() + LOCKOUT_SECONDS
-                    st.session_state._pw_attempts = 0
-                    st.error(f"Too many wrong attempts. Locked for {LOCKOUT_SECONDS}s.")
-                else:
-                    st.error(f"Wrong password. {MAX_ATTEMPTS - n} attempt(s) left before a short lockout.")
-    st.stop()
+                left = MAX_ATTEMPTS - st.session_state.get("_pw_attempts", 0)
+                st.error("Wrong password." if st.session_state.get("_pw_locked_until", 0) > time.time()
+                        else f"Wrong password. {left} attempt(s) left before a short lockout.")
+    _shell(body)
 
 
-def logout_button() -> None:
-    """Sidebar control shown only when a password is configured and the session is unlocked."""
-    if _configured_hash() is not None and logged_in():
-        if st.sidebar.button("🔒 Lock", key="_pw_logout", use_container_width=True):
+def _first_run_screen() -> None:
+    def body():
+        st.caption("No password set yet. Set one now, or skip and use the dashboard without one - fine for your "
+                  "own machine, but anyone with the link can open it while skipped.")
+        with st.form("orb_setup", clear_on_submit=False):
+            pw1 = st.text_input("New password", type="password")
+            pw2 = st.text_input("Confirm password", type="password")
+            c1, c2 = st.columns(2)
+            set_click = c1.form_submit_button("Set password", type="primary", use_container_width=True)
+            skip_click = c2.form_submit_button("Skip - stay open", use_container_width=True)
+        if set_click:
+            if not pw1:
+                st.error("Enter a password.")
+            elif pw1 != pw2:
+                st.error("Passwords don't match.")
+            else:
+                set_password(pw1)
+                st.session_state._authed = True
+                st.rerun()
+        if skip_click:
+            st.session_state._authed = True
+            st.rerun()
+    _shell(body)
+
+
+def require_login() -> None:
+    """Call once, right after store.init(), before anything else renders. Halts the script with st.stop() until
+    unlocked; does nothing once the session is authed."""
+    if logged_in():
+        return
+    if is_set():
+        _login_screen()
+    else:
+        _first_run_screen()
+
+
+def sidebar_controls() -> None:
+    """Sidebar block: lock button, plus set/change/remove for the in-app password. Hidden (mostly) when the host
+    has locked it via an env var, since there's nothing to manage from inside the app in that case."""
+    if host_locked():
+        st.caption("🔒 Password set by host (env var) - can't be changed here.")
+        if logged_in() and st.button("Lock", key="_pw_lock", use_container_width=True):
             st.session_state._authed = False
             st.rerun()
-        # Host-provided credentials cannot be changed from the UI; use the local password store otherwise.
-        if not (os.environ.get("APP_PASSWORD") or os.environ.get("APP_PASSWORD_HASH") or _secret("APP_PASSWORD") or _secret("APP_PASSWORD_HASH")):
-            with st.sidebar.expander("Change password"):
-                with st.form("_pw_change", clear_on_submit=True):
-                    old = st.text_input("Current password", type="password")
-                    new = st.text_input("New password", type="password")
-                    confirm = st.text_input("Confirm new password", type="password")
-                    save = st.form_submit_button("Save password", use_container_width=True)
-                if save:
-                    current = _stored_hash() or ""
-                    if not _verify(old, current):
-                        st.error("Current password is incorrect.")
-                    elif len(new) < 8:
-                        st.error("Use at least 8 characters.")
-                    elif new != confirm:
-                        st.error("Passwords do not match.")
-                    else:
-                        _save_hash(hash_password(new))
-                        st.success("Password changed.")
+        return
+
+    if is_set():
+        if st.button("🔒 Lock now", key="_pw_lock", use_container_width=True):
+            st.session_state._authed = False
+            st.rerun()
+        with st.expander("Change password"):
+            with st.form("orb_change_pw", clear_on_submit=True):
+                old = st.text_input("Current password", type="password", key="_pw_old")
+                new1 = st.text_input("New password", type="password", key="_pw_new1")
+                new2 = st.text_input("Confirm new password", type="password", key="_pw_new2")
+                go = st.form_submit_button("Update password", use_container_width=True)
+            if go:
+                if not new1:
+                    st.error("Enter a new password.")
+                elif new1 != new2:
+                    st.error("New passwords don't match.")
+                elif change_password(old, new1):
+                    st.success("Password updated.")
+                else:
+                    st.error("Current password is wrong.")
+            if st.button("Remove password (go back to open access)", key="_pw_remove", use_container_width=True):
+                remove_password()
+                st.rerun()
+    else:
+        with st.expander("🔓 Set a password"):
+            with st.form("orb_set_pw", clear_on_submit=True):
+                new1 = st.text_input("New password", type="password", key="_pw_set1")
+                new2 = st.text_input("Confirm password", type="password", key="_pw_set2")
+                go = st.form_submit_button("Set password", use_container_width=True)
+            if go:
+                if not new1:
+                    st.error("Enter a password.")
+                elif new1 != new2:
+                    st.error("Passwords don't match.")
+                else:
+                    set_password(new1)
+                    st.success("Password set. It'll be required next time the app is opened.")
